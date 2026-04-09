@@ -563,6 +563,60 @@ with st.sidebar:
             st.session_state.pop(k, None)
         st.rerun()
 
+    if st.session_state.get("rol") == "admin":
+        st.markdown("---")
+        st.markdown("**⚙️ Administración**")
+
+        # ── Respaldo de base de datos ────────────────────────────────────
+        try:
+            with open("equipo.db", "rb") as f:
+                db_bytes = f.read()
+            from datetime import date as _date
+            nombre_backup = f"equipo_backup_{_date.today()}.db"
+            st.download_button(
+                label="💾 Descargar respaldo DB",
+                data=db_bytes,
+                file_name=nombre_backup,
+                mime="application/octet-stream",
+                help="Descarga una copia de seguridad de todos los datos"
+            )
+        except FileNotFoundError:
+            st.caption("Base de datos aún no creada.")
+
+        # ── Borrar datos de prueba (mantiene jugadores) ──────────────────
+        st.markdown("---")
+        st.markdown("**🗑️ Borrar datos de prueba**")
+        st.caption("Elimina partidos, pagos, tarjetas, goles y sanciones. Los jugadores se conservan.")
+
+        key_confirm_reset = "confirm_reset_db"
+        if st.session_state.get(key_confirm_reset):
+            st.warning("⚠️ Esta acción no se puede deshacer. ¿Confirmas?")
+            col_si, col_no = st.columns(2)
+            with col_si:
+                if st.button("✅ Sí, borrar", type="primary"):
+                    conn = get_conn()
+                    tablas_a_borrar = [
+                        "goles", "cambios", "multas", "tarjetas",
+                        "sanciones", "pagos", "participaciones", "caja", "partidos"
+                    ]
+                    for tbl in tablas_a_borrar:
+                        conn.execute(f"DELETE FROM {tbl}")
+                    # Resetear autoincrement
+                    conn.execute("DELETE FROM sqlite_sequence WHERE name != 'jugadores'")
+                    conn.commit()
+                    conn.close()
+                    st.session_state[key_confirm_reset] = False
+                    st.success("✅ Datos de prueba eliminados. Jugadores conservados.")
+                    st.rerun()
+            with col_no:
+                if st.button("❌ Cancelar"):
+                    st.session_state[key_confirm_reset] = False
+                    st.rerun()
+        else:
+            if st.button("🗑️ Borrar datos de prueba"):
+                st.session_state[key_confirm_reset] = True
+                st.rerun()
+
 IS_ADMIN = st.session_state.get("rol") == "admin"
 
 # ─── CUSTOM CSS ────────────────────────────────────────────────────────────────
