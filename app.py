@@ -1716,6 +1716,30 @@ if IS_ADMIN:
         else:
             pid_f3 = int(partidos_list.iloc[opciones_f3[1:].index(sel_f3)]['id'])
 
+            # ── Auto-crear pagos para suplentes que no tienen cuota ────────
+            # Detecta suplentes sin pago registrado y los agrega automáticamente
+            monto_ref = q("SELECT MAX(monto) as m FROM pagos WHERE partido_id=?", (pid_f3,))
+            monto_cuota_f3 = float(monto_ref.iloc[0]['m']) if len(monto_ref)>0 and monto_ref.iloc[0]['m'] else 0.0
+            if monto_cuota_f3 > 0:
+                suplentes_sin_pago = q("""
+                    SELECT pa.jugador_id, j.nombre, j.exento_arbitraje
+                    FROM participaciones pa
+                    JOIN jugadores j ON j.id=pa.jugador_id
+                    WHERE pa.partido_id=? AND pa.rol='cambio'
+                      AND j.exento_arbitraje=0
+                      AND pa.jugador_id NOT IN (
+                          SELECT jugador_id FROM pagos WHERE partido_id=?
+                      )
+                """, (pid_f3, pid_f3))
+                if len(suplentes_sin_pago) > 0:
+                    conn_fix = get_conn()
+                    for _, sp in suplentes_sin_pago.iterrows():
+                        conn_fix.execute(
+                            "INSERT INTO pagos (partido_id,jugador_id,monto,pagado) VALUES (?,?,?,0)",
+                            (pid_f3, int(sp['jugador_id']), monto_cuota_f3))
+                    conn_fix.commit(); conn_fix.close()
+                    st.rerun()
+
             # ── Cuotas y multas del partido ──────────────────────────────
             pagos_df = q("""
                 SELECT pg.id, j.nombre, j.id as jugador_id,
