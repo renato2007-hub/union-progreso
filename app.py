@@ -513,333 +513,6 @@ def generar_pdf_partido(pid):
     buf.seek(0)
     return buf.getvalue()
 
-# ─── PAGE CONFIG ───────────────────────────────────────────────────────────────
-st.set_page_config(
-    page_title="⚽ Unión y Progreso",
-    page_icon="⚽",
-    layout="wide",
-    initial_sidebar_state="collapsed",
-)
-
-# ─── LOGIN ─────────────────────────────────────────────────────────────────────
-# Las contraseñas se leen desde Streamlit Secrets (seguro).
-# En local usa los valores por defecto si no hay secrets configurados.
-try:
-    PASS_ADMIN   = st.secrets["PASS_ADMIN"]
-    PASS_JUGADOR = st.secrets["PASS_JUGADOR"]
-except Exception:
-    # Valores por defecto para desarrollo local
-    PASS_ADMIN   = "Renato"
-    PASS_JUGADOR = "Progreso"
-
-USUARIOS = {
-    "admin":   {"password": PASS_ADMIN,   "rol": "admin"},
-    "jugador": {"password": PASS_JUGADOR, "rol": "jugador"},
-}
-
-def login_screen():
-    st.markdown("""
-    <div style="max-width:380px;margin:60px auto 0 auto;text-align:center;">
-      <div style="font-family:'Bebas Neue',sans-serif;font-size:52px;
-                  color:#f0c040;letter-spacing:4px;">⚽</div>
-      <div style="font-family:'Bebas Neue',sans-serif;font-size:32px;
-                  color:#f0c040;letter-spacing:3px;">UNIÓN Y PROGRESO</div>
-      <div style="color:#d4b8b8;font-size:12px;letter-spacing:2px;
-                  margin-bottom:32px;">BARRIO LA LIBERTAD</div>
-    </div>
-    """, unsafe_allow_html=True)
-
-    with st.form("login_form"):
-        st.markdown("<div style='max-width:380px;margin:0 auto;'>", unsafe_allow_html=True)
-        usuario  = st.text_input("👤 Usuario", placeholder="Ingresa tu usuario")
-        password = st.text_input("🔑 Contraseña", type="password", placeholder="Ingresa tu contraseña")
-        entrar   = st.form_submit_button("ENTRAR", use_container_width=True, type="primary")
-        st.markdown("</div>", unsafe_allow_html=True)
-
-        if entrar:
-            u = usuario.strip().lower()
-            if u in USUARIOS and USUARIOS[u]["password"] == password:
-                st.session_state["usuario"] = u
-                st.session_state["rol"]     = USUARIOS[u]["rol"]
-                st.rerun()
-            else:
-                st.error("Usuario o contraseña incorrectos.")
-
-if "usuario" not in st.session_state:
-    login_screen()
-    st.stop()
-
-# Botón de cerrar sesión en sidebar
-with st.sidebar:
-    rol_actual = st.session_state.get("rol", "jugador")
-    icono_rol  = "🔐 Admin" if rol_actual == "admin" else "👤 Jugador"
-    st.markdown(f"**{icono_rol}** — {st.session_state['usuario']}")
-    if st.button("🚪 Cerrar sesión"):
-        for k in ["usuario", "rol"]:
-            st.session_state.pop(k, None)
-        st.rerun()
-
-    if st.session_state.get("rol") == "admin":
-        st.markdown("---")
-        st.markdown("**⚙️ Administración**")
-
-        # ── Respaldo de base de datos ────────────────────────────────────
-        try:
-            with open("equipo.db", "rb") as f:
-                db_bytes = f.read()
-            from datetime import date as _date
-            nombre_backup = f"equipo_backup_{_date.today()}.db"
-            st.download_button(
-                label="💾 Descargar respaldo DB",
-                data=db_bytes,
-                file_name=nombre_backup,
-                mime="application/octet-stream",
-                help="Descarga una copia de seguridad de todos los datos"
-            )
-        except FileNotFoundError:
-            st.caption("Base de datos aún no creada.")
-
-        # ── Borrar datos de prueba (mantiene jugadores) ──────────────────
-        st.markdown("---")
-        st.markdown("**🗑️ Borrar datos de prueba**")
-        st.caption("Elimina partidos, pagos, tarjetas, goles y sanciones. Los jugadores se conservan.")
-
-        key_confirm_reset = "confirm_reset_db"
-        if st.session_state.get(key_confirm_reset):
-            st.warning("⚠️ Esta acción no se puede deshacer. ¿Confirmas?")
-            col_si, col_no = st.columns(2)
-            with col_si:
-                if st.button("✅ Sí, borrar", type="primary"):
-                    conn = get_conn()
-                    tablas_a_borrar = [
-                        "goles", "cambios", "multas", "tarjetas",
-                        "sanciones", "pagos", "participaciones", "caja", "partidos"
-                    ]
-                    for tbl in tablas_a_borrar:
-                        conn.execute(f"DELETE FROM {tbl}")
-                    try:
-                        conn.execute("DELETE FROM sqlite_sequence WHERE name != 'jugadores'")
-                    except Exception:
-                        pass
-                    conn.commit()
-                    conn.close()
-                    # Limpiar todo el session_state excepto login
-                    keys_keep = {"usuario", "rol"}
-                    for k in list(st.session_state.keys()):
-                        if k not in keys_keep:
-                            del st.session_state[k]
-                    st.success("✅ Datos de prueba eliminados. Jugadores conservados.")
-                    st.rerun()
-            with col_no:
-                if st.button("❌ Cancelar"):
-                    st.session_state[key_confirm_reset] = False
-                    st.rerun()
-        else:
-            if st.button("🗑️ Borrar datos de prueba"):
-                st.session_state[key_confirm_reset] = True
-                st.rerun()
-
-IS_ADMIN = st.session_state.get("rol") == "admin"
-
-# ─── CUSTOM CSS ────────────────────────────────────────────────────────────────
-st.markdown("""
-<style>
-@import url('https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Nunito:wght@400;600;700;800&display=swap');
-
-:root {
-    --verde: #9b2335;
-    --verde-claro: #f0c040;
-    --verde-oscuro: #6b1020;
-    --blanco: #ffffff;
-    --gris: #d4b8b8;
-    --alerta: #f0c040;
-    --peligro: #ff6b6b;
-    --fondo: #1a0808;
-    --card: #2d1010;
-    --card2: #3d1515;
-    --borde: #6b2525;
-}
-
-html, body, [class*="css"] {
-    font-family: 'Nunito', sans-serif;
-    background-color: var(--fondo);
-    color: var(--blanco);
-}
-
-h1, h2, h3 { font-family: 'Bebas Neue', sans-serif; letter-spacing: 2px; }
-
-.stApp { background-color: var(--fondo); }
-
-/* Tabs */
-.stTabs [data-baseweb="tab-list"] {
-    background: var(--card);
-    border-radius: 12px;
-    padding: 4px;
-    gap: 4px;
-    border: 1px solid var(--borde);
-}
-.stTabs [data-baseweb="tab"] {
-    background: transparent;
-    color: var(--gris);
-    border-radius: 8px;
-    font-family: 'Nunito', sans-serif;
-    font-weight: 700;
-    font-size: 13px;
-    padding: 8px 14px;
-}
-.stTabs [aria-selected="true"] {
-    background: var(--verde) !important;
-    color: white !important;
-}
-
-/* Metric cards */
-.metric-card {
-    background: var(--card);
-    border: 1px solid var(--borde);
-    border-radius: 14px;
-    padding: 18px 20px;
-    margin-bottom: 12px;
-}
-.metric-card .label {
-    font-size: 11px;
-    color: var(--gris);
-    text-transform: uppercase;
-    letter-spacing: 1px;
-    margin-bottom: 4px;
-}
-.metric-card .valor {
-    font-family: 'Bebas Neue', sans-serif;
-    font-size: 36px;
-    color: var(--verde-claro);
-    line-height: 1;
-}
-.metric-card .sub {
-    font-size: 12px;
-    color: var(--gris);
-    margin-top: 4px;
-}
-
-/* Player cards */
-.jugador-card {
-    background: var(--card);
-    border: 1px solid var(--borde);
-    border-radius: 12px;
-    padding: 14px 16px;
-    margin-bottom: 8px;
-    display: flex;
-    align-items: center;
-    gap: 12px;
-}
-.jugador-num {
-    background: var(--verde-oscuro);
-    color: var(--verde-claro);
-    font-family: 'Bebas Neue', sans-serif;
-    font-size: 22px;
-    width: 40px;
-    height: 40px;
-    border-radius: 8px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    flex-shrink: 0;
-}
-.badge {
-    display: inline-block;
-    padding: 2px 8px;
-    border-radius: 20px;
-    font-size: 11px;
-    font-weight: 700;
-    margin-right: 4px;
-}
-.badge-amarilla { background: #3d3000; color: #f0c040; border: 1px solid #f0c040; }
-.badge-roja { background: #3d0000; color: #ff6b6b; border: 1px solid #ff6b6b; }
-.badge-deuda { background: #3d1500; color: #ffaa55; border: 1px solid #ffaa55; }
-.badge-ok { background: #003d1a; color: #50e080; border: 1px solid #50e080; }
-.badge-exento { background: #003340; color: #55bbee; border: 1px solid #55bbee; }
-.badge-sancion { background: #9b2335; color: white; }
-
-/* Tables */
-.stDataFrame { border-radius: 12px; overflow: hidden; }
-
-/* Inputs */
-.stTextInput input, .stNumberInput input, .stSelectbox select {
-    background: var(--card2) !important;
-    border: 1px solid var(--borde) !important;
-    color: #ffffff !important;
-    border-radius: 8px !important;
-}
-.stDateInput input {
-    background: var(--card2) !important;
-    border: 1px solid var(--borde) !important;
-    color: #ffffff !important;
-}
-label, .stTextInput label, .stNumberInput label, .stSelectbox label,
-.stDateInput label, .stMultiSelect label, .stTextArea label,
-div[data-testid="stWidgetLabel"] p { color: #ffffff !important; font-weight: 600 !important; }
-.stTextArea textarea {
-    background: var(--card2) !important; border: 1px solid var(--borde) !important;
-    color: #ffffff !important; border-radius: 8px !important;
-}
-.stMultiSelect div[data-baseweb="select"] { background: var(--card2) !important; }
-.stMultiSelect [data-baseweb="tag"] { background: var(--verde) !important; color: white !important; }
-.stMultiSelect input { color: #ffffff !important; }
-.stSelectbox div[data-baseweb="select"] > div { background: var(--card2) !important; color: #ffffff !important; }
-
-/* Buttons */
-.stButton button {
-    background: var(--verde);
-    color: white;
-    border: none;
-    border-radius: 8px;
-    font-family: 'Nunito', sans-serif;
-    font-weight: 700;
-    padding: 8px 20px;
-    transition: background 0.2s;
-}
-.stButton button:hover { background: var(--verde-claro); }
-
-/* Section headers */
-.section-header {
-    font-family: 'Bebas Neue', sans-serif;
-    font-size: 22px;
-    color: #f0c040;
-    letter-spacing: 2px;
-    border-bottom: 2px solid var(--borde);
-    padding-bottom: 6px;
-    margin: 18px 0 12px 0;
-}
-
-/* Alert boxes */
-.alerta-box {
-    background: #2a1a00;
-    border: 1px solid var(--alerta);
-    border-radius: 10px;
-    padding: 12px 16px;
-    margin-bottom: 8px;
-    font-size: 14px;
-}
-.peligro-box {
-    background: #2a0000;
-    border: 1px solid var(--peligro);
-    border-radius: 10px;
-    padding: 12px 16px;
-    margin-bottom: 8px;
-    font-size: 14px;
-}
-.ok-box {
-    background: #002a10;
-    border: 1px solid var(--verde-claro);
-    border-radius: 10px;
-    padding: 12px 16px;
-    margin-bottom: 8px;
-    font-size: 14px;
-}
-
-div[data-testid="stCheckbox"] label { color: #ffffff !important; }
-div[data-testid="stMultiSelect"] span { background: var(--verde-oscuro) !important; color: #ffffff !important; }
-</style>
-""", unsafe_allow_html=True)
-
 # ─── DATABASE ──────────────────────────────────────────────────────────────────
 def get_conn():
     conn = sqlite3.connect("equipo.db", check_same_thread=False)
@@ -968,6 +641,100 @@ def init_db():
     conn.close()
 
 init_db()
+
+# ─── PAGE CONFIG ───────────────────────────────────────────────────────────────
+st.set_page_config(
+    page_title="⚽ Unión y Progreso",
+    page_icon="⚽",
+    layout="wide",
+    initial_sidebar_state="collapsed",
+)
+
+# ─── LOGIN ─────────────────────────────────────────────────────────────────────
+try:
+    PASS_ADMIN   = st.secrets["PASS_ADMIN"]
+    PASS_JUGADOR = st.secrets["PASS_JUGADOR"]
+except Exception:
+    PASS_ADMIN   = "Renato"
+    PASS_JUGADOR = "Progreso"
+
+USUARIOS = {
+    "admin":   {"password": PASS_ADMIN,   "rol": "admin"},
+    "jugador": {"password": PASS_JUGADOR, "rol": "jugador"},
+}
+
+def login_screen():
+    st.markdown("""
+    <div style="max-width:380px;margin:60px auto 0 auto;text-align:center;">
+      <div style="font-family:'Bebas Neue',sans-serif;font-size:52px;color:#f0c040;letter-spacing:4px;">⚽</div>
+      <div style="font-family:'Bebas Neue',sans-serif;font-size:32px;color:#f0c040;letter-spacing:3px;">UNIÓN Y PROGRESO</div>
+      <div style="color:#d4b8b8;font-size:12px;letter-spacing:2px;margin-bottom:32px;">BARRIO LA LIBERTAD</div>
+    </div>""", unsafe_allow_html=True)
+    with st.form("login_form"):
+        usuario  = st.text_input("👤 Usuario", placeholder="Ingresa tu usuario")
+        password = st.text_input("🔑 Contraseña", type="password", placeholder="Ingresa tu contraseña")
+        entrar   = st.form_submit_button("ENTRAR", use_container_width=True, type="primary")
+        if entrar:
+            u = usuario.strip().lower()
+            if u in USUARIOS and USUARIOS[u]["password"] == password:
+                st.session_state["usuario"] = u
+                st.session_state["rol"]     = USUARIOS[u]["rol"]
+                st.rerun()
+            else:
+                st.error("Usuario o contraseña incorrectos.")
+
+if "usuario" not in st.session_state:
+    login_screen()
+    st.stop()
+
+IS_ADMIN = st.session_state.get("rol") == "admin"
+
+with st.sidebar:
+    icono_rol = "🔐 Admin" if IS_ADMIN else "👤 Jugador"
+    st.markdown(f"**{icono_rol}** — {st.session_state['usuario']}")
+    if st.button("🚪 Cerrar sesión"):
+        for k in ["usuario", "rol"]: st.session_state.pop(k, None)
+        st.rerun()
+    if IS_ADMIN:
+        st.markdown("---")
+        st.markdown("**⚙️ Administración**")
+        try:
+            with open("equipo.db", "rb") as f_db:
+                db_bytes = f_db.read()
+            from datetime import date as _date
+            st.download_button("💾 Descargar respaldo DB", data=db_bytes,
+                file_name=f"equipo_backup_{_date.today()}.db",
+                mime="application/octet-stream")
+        except FileNotFoundError:
+            st.caption("Base de datos aún no creada.")
+        st.markdown("---")
+        st.markdown("**🗑️ Borrar datos de prueba**")
+        st.caption("Elimina partidos, pagos, tarjetas, goles y sanciones. Los jugadores se conservan.")
+        key_confirm_reset = "confirm_reset_db"
+        if st.session_state.get(key_confirm_reset):
+            st.warning("⚠️ Esta acción no se puede deshacer. ¿Confirmas?")
+            col_si, col_no = st.columns(2)
+            with col_si:
+                if st.button("✅ Sí, borrar", type="primary"):
+                    _conn = get_conn()
+                    for _tbl in ["goles","cambios","multas","tarjetas","sanciones","pagos","participaciones","caja","partidos"]:
+                        _conn.execute(f"DELETE FROM {_tbl}")
+                    try: _conn.execute("DELETE FROM sqlite_sequence WHERE name != 'jugadores'")
+                    except Exception: pass
+                    _conn.commit(); _conn.close()
+                    keys_keep = {"usuario", "rol"}
+                    for k in list(st.session_state.keys()):
+                        if k not in keys_keep: del st.session_state[k]
+                    st.success("✅ Datos eliminados. Jugadores conservados.")
+                    st.rerun()
+            with col_no:
+                if st.button("❌ Cancelar"):
+                    st.session_state[key_confirm_reset] = False
+                    st.rerun()
+        else:
+            if st.button("🗑️ Borrar datos de prueba"):
+                st.session_state[key_confirm_reset] = True
+                st.rerun()
 
 # ─── HELPERS ───────────────────────────────────────────────────────────────────
 def q(sql, params=()):
