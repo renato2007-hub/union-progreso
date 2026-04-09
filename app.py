@@ -617,11 +617,17 @@ with st.sidebar:
                     ]
                     for tbl in tablas_a_borrar:
                         conn.execute(f"DELETE FROM {tbl}")
-                    # Resetear autoincrement
-                    conn.execute("DELETE FROM sqlite_sequence WHERE name != 'jugadores'")
+                    try:
+                        conn.execute("DELETE FROM sqlite_sequence WHERE name != 'jugadores'")
+                    except Exception:
+                        pass
                     conn.commit()
                     conn.close()
-                    st.session_state[key_confirm_reset] = False
+                    # Limpiar todo el session_state excepto login
+                    keys_keep = {"usuario", "rol"}
+                    for k in list(st.session_state.keys()):
+                        if k not in keys_keep:
+                            del st.session_state[k]
                     st.success("✅ Datos de prueba eliminados. Jugadores conservados.")
                     st.rerun()
             with col_no:
