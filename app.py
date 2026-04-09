@@ -980,7 +980,7 @@ def get_jugadores():
     return q("SELECT * FROM jugadores WHERE activo=1 ORDER BY numero")
 
 def get_partidos():
-    return q("SELECT * FROM partidos ORDER BY fecha DESC")
+    return q("SELECT * FROM partidos ORDER BY id DESC")
 
 def saldo_caja():
     r = q("SELECT SUM(monto) as total FROM caja")
@@ -1373,8 +1373,9 @@ if IS_ADMIN:
                     c.execute("INSERT INTO caja (partido_id,concepto,monto,fecha) VALUES (?,?,?,?)",
                               (pid, f"Gastos partido vs {f1_rival.strip()}", -(f1_arb+f1_agua), str(f1_fecha)))
                 conn.commit(); conn.close()
-                # Limpiar borrador al guardar exitosamente
+                # Limpiar borrador y guardar el pid del partido recién creado
                 st.session_state['f1_draft'] = {}
+                st.session_state['ultimo_pid'] = pid
                 resumen_cambios = ", ".join([f"{e} x {s} (min.{m})" for s,e,m in cambios_data]) if cambios_data else "ninguno"
                 st.success(f"✅ Alineación guardada — {len(f1_titulares)} titulares, "
                            f"{len(cambios_data)} cambio(s). Ve a Fase 2 para registrar los eventos.")
@@ -1391,8 +1392,14 @@ if IS_ADMIN:
         st.info("Primero guarda una alineación en la Fase 1.")
     else:
         opciones_f2 = [f"{r['fecha']} vs {r['rival']}" for _, r in partidos_list.iterrows()]
-        # Por defecto muestra el partido más reciente (índice 0 = más reciente)
-        sel_f2 = st.selectbox("Selecciona el partido", opciones_f2, key="sel_f2", index=0)
+        # Por defecto: el último partido creado en Fase 1, o el más reciente
+        ultimo_pid = st.session_state.get('ultimo_pid', None)
+        ids_list = partidos_list['id'].tolist()
+        if ultimo_pid and ultimo_pid in ids_list:
+            idx_f2 = ids_list.index(ultimo_pid)
+        else:
+            idx_f2 = 0  # más reciente
+        sel_f2 = st.selectbox("Selecciona el partido", opciones_f2, key="sel_f2", index=idx_f2)
         pid_f2 = int(partidos_list.iloc[opciones_f2.index(sel_f2)]['id'])
         p_data = partidos_list[partidos_list['id']==pid_f2].iloc[0]
 
@@ -1713,7 +1720,13 @@ if IS_ADMIN:
         st.info("Aún no hay partidos registrados.")
     else:
         opciones_f3 = [f"{r['fecha']} vs {r['rival']}" for _, r in partidos_list.iterrows()]
-        sel_f3 = st.selectbox("Selecciona el partido", opciones_f3, key="sel_f3", index=0)
+        ultimo_pid = st.session_state.get('ultimo_pid', None)
+        ids_list_f3 = partidos_list['id'].tolist()
+        if ultimo_pid and ultimo_pid in ids_list_f3:
+            idx_f3 = ids_list_f3.index(ultimo_pid)
+        else:
+            idx_f3 = 0
+        sel_f3 = st.selectbox("Selecciona el partido", opciones_f3, key="sel_f3", index=idx_f3)
         pid_f3 = int(partidos_list.iloc[opciones_f3.index(sel_f3)]['id'])
 
         # ── Cuotas de arbitraje ──────────────────────────────────────────
