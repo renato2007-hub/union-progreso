@@ -1770,89 +1770,73 @@ if IS_ADMIN:
                     st.markdown(f"""<div class="metric-card"><div class="label">⏳ Pendiente partido</div>
                         <div class="valor" style="font-size:24px;color:#cc0000;">${pend_cuotas:,.2f}</div></div>""", unsafe_allow_html=True)
 
-                st.markdown("<small style='color:#7a3030;'>💡 <b style='color:#1a0808;'>Deuda total</b> = cuota árbitro + multas de este partido + deudas anteriores sin pagar.</small>", unsafe_allow_html=True)
+                st.markdown("<small style='color:#7a3030;'>💡 Ingresa cuánto paga cada jugador. El <b>Total</b> incluye cuota árbitro + multas + deudas anteriores.</small>", unsafe_allow_html=True)
                 nuevos_pagos_cuota = {}
+                nuevas_multas = {}
+
+                # Cabecera de columnas
+                hc1, hc2, hc3, hc4, hc5, hc6 = st.columns([2.5, 1.2, 1.2, 1.2, 1.2, 1.5])
+                with hc1: st.markdown("<small style='color:#7a3030;font-weight:700;'>JUGADOR</small>", unsafe_allow_html=True)
+                with hc2: st.markdown("<small style='color:#7a3030;font-weight:700;'>CUOTA</small>", unsafe_allow_html=True)
+                with hc3: st.markdown("<small style='color:#7a3030;font-weight:700;'>MULTAS</small>", unsafe_allow_html=True)
+                with hc4: st.markdown("<small style='color:#7a3030;font-weight:700;'>ANTERIOR</small>", unsafe_allow_html=True)
+                with hc5: st.markdown("<small style='color:#7a3030;font-weight:700;'>TOTAL DEBE</small>", unsafe_allow_html=True)
+                with hc6: st.markdown("<small style='color:#7a3030;font-weight:700;'>PAGA AHORA</small>", unsafe_allow_html=True)
+                st.markdown("<hr style='margin:4px 0 8px 0; border-color:#d4a0a0;'>", unsafe_allow_html=True)
 
                 for _, row in pagos_df.iterrows():
                     jid = int(row['jugador_id'])
-                    deuda_partido = float(row['monto']) - float(row['monto_pagado'])
-                    ya_saldado    = bool(row['pagado'])
+                    cuota_pendiente = float(row['monto']) - float(row['monto_pagado'])
 
-                    # Multas de ESTE partido para este jugador
-                    multas_este = float(q("""
-                        SELECT COALESCE(SUM(monto - COALESCE(monto_pagado,0)),0) as d
-                        FROM multas WHERE jugador_id=? AND pagado=0 AND partido_id=?
-                    """, (jid, pid_f3))['d'][0])
+                    # Multas de ESTE partido
+                    multas_jug = q("""SELECT id, concepto, monto, COALESCE(monto_pagado,0) as mp
+                                      FROM multas WHERE jugador_id=? AND pagado=0 AND partido_id=?
+                                   """, (jid, pid_f3))
+                    multa_total_este = float(multas_jug['monto'].sum() - multas_jug['mp'].sum()) if len(multas_jug) > 0 else 0.0
 
-                    # Deuda acumulada de OTROS partidos
-                    deuda_otros_cuotas = float(q("""
-                        SELECT COALESCE(SUM(monto - COALESCE(monto_pagado,0)),0) as d
-                        FROM pagos WHERE jugador_id=? AND pagado=0 AND partido_id!=?
-                    """, (jid, pid_f3))['d'][0])
-                    deuda_otros_multas = float(q("""
-                        SELECT COALESCE(SUM(monto - COALESCE(monto_pagado,0)),0) as d
-                        FROM multas WHERE jugador_id=? AND pagado=0 AND partido_id!=?
-                    """, (jid, pid_f3))['d'][0])
+                    # Deuda de OTROS partidos
+                    deuda_ant_cuotas = float(q("""SELECT COALESCE(SUM(monto-COALESCE(monto_pagado,0)),0) as d
+                        FROM pagos WHERE jugador_id=? AND pagado=0 AND partido_id!=?""", (jid, pid_f3))['d'][0])
+                    deuda_ant_multas = float(q("""SELECT COALESCE(SUM(monto-COALESCE(monto_pagado,0)),0) as d
+                        FROM multas WHERE jugador_id=? AND pagado=0 AND partido_id!=?""", (jid, pid_f3))['d'][0])
+                    deuda_anterior = deuda_ant_cuotas + deuda_ant_multas
+                    deuda_total    = cuota_pendiente + multa_total_este + deuda_anterior
 
-                    deuda_anterior  = deuda_otros_cuotas + deuda_otros_multas
-                    deuda_este_tot  = deuda_partido + multas_este   # cuota + multas de este partido
-                    deuda_total     = deuda_este_tot + deuda_anterior
+                    rol_str = "Titular" if row['rol']=='titular' else ("Cambio" if row['rol']=='cambio' else "")
+                    color_tot = "#007a30" if deuda_total < 0.001 else "#cc0000"
+                    nombre_icon = " ✅" if deuda_total < 0.001 else ""
 
-                    rol_str = "⚽ Titular" if row['rol']=='titular' else ("🔄 Cambio" if row['rol']=='cambio' else "")
-
-                    col_nom, col_part, col_acum, col_total, col_paga = st.columns([3, 1.5, 1.5, 1.5, 1.5])
-                    with col_nom:
-                        color_nom = "#007a30" if deuda_total < 0.001 else "#1a0808"
-                        estado_icon = " ✅" if deuda_total < 0.001 else ""
-                        st.markdown(f"<span style='color:{color_nom};font-weight:700;'>{row['nombre']}{estado_icon}</span> "
+                    rc1, rc2, rc3, rc4, rc5, rc6 = st.columns([2.5, 1.2, 1.2, 1.2, 1.2, 1.5])
+                    with rc1:
+                        st.markdown(f"<span style='font-weight:700;color:#1a0808;'>{row['nombre']}{nombre_icon}</span><br>"
                                     f"<small style='color:#7a3030;'>{rol_str}</small>", unsafe_allow_html=True)
-                    with col_part:
-                        color_p = "#007a30" if deuda_este_tot < 0.001 else "#cc0000"
-                        label_p = "Este partido"
-                        if multas_este > 0.001:
-                            label_p = f"Este partido<br><small style='color:#b85000;'>inc. multa ${multas_este:,.2f}</small>"
-                        st.markdown(f"<small style='color:#7a3030;'>{label_p}</small><br>"
-                                    f"<span style='color:{color_p};font-weight:700;'>${deuda_este_tot:,.2f}</span>", unsafe_allow_html=True)
-                    with col_acum:
-                        color_ant = "#b85000" if deuda_anterior > 0 else "#007a30"
-                        st.markdown(f"<small style='color:#7a3030;'>Anterior</small><br>"
-                                    f"<span style='color:{color_ant};font-weight:700;'>${deuda_anterior:,.2f}</span>", unsafe_allow_html=True)
-                    with col_total:
-                        color_tot = "#007a30" if deuda_total < 0.001 else "#cc0000"
-                        st.markdown(f"<small style='color:#7a3030;'>Total debe</small><br>"
-                                    f"<span style='color:{color_tot};font-weight:800;'>${deuda_total:,.2f}</span>", unsafe_allow_html=True)
-                    with col_paga:
+                    with rc2:
+                        c = "#007a30" if cuota_pendiente < 0.001 else "#cc0000"
+                        st.markdown(f"<span style='color:{c};font-weight:700;'>${cuota_pendiente:,.2f}</span>", unsafe_allow_html=True)
+                    with rc3:
+                        c = "#007a30" if multa_total_este < 0.001 else "#b85000"
+                        st.markdown(f"<span style='color:{c};font-weight:700;'>${multa_total_este:,.2f}</span>", unsafe_allow_html=True)
+                    with rc4:
+                        c = "#007a30" if deuda_anterior < 0.001 else "#b85000"
+                        st.markdown(f"<span style='color:{c};font-weight:700;'>${deuda_anterior:,.2f}</span>", unsafe_allow_html=True)
+                    with rc5:
+                        st.markdown(f"<span style='color:{color_tot};font-weight:800;'>${deuda_total:,.2f}</span>", unsafe_allow_html=True)
+                    with rc6:
                         if deuda_total > 0.001:
-                            paga_ahora = st.number_input("Paga $", min_value=0.0,
+                            paga_ahora = st.number_input("$", min_value=0.0,
                                 max_value=float(deuda_total), value=0.0, step=0.5,
-                                help=f"Puede pagar hasta ${deuda_total:,.2f}",
-                                key=f"f3_cuota_{row['id']}", label_visibility="visible")
+                                key=f"f3_cuota_{row['id']}", label_visibility="collapsed")
                         else:
                             st.markdown("<small style='color:#007a30;'>✅ Al día</small>", unsafe_allow_html=True)
                             paga_ahora = 0.0
-                    nuevos_pagos_cuota[int(row['id'])] = (float(row['monto_pagado']), float(row['monto']), paga_ahora, deuda_partido, jid)
 
-            # ── Multas por tarjetas ──────────────────────────────────────────
-            multas_df = q("""SELECT m.id, j.nombre, j.id as jugador_id, m.concepto, m.monto,
-                                   COALESCE(m.monto_pagado,0) as monto_pagado, m.pagado
-                             FROM multas m JOIN jugadores j ON m.jugador_id=j.id
-                             WHERE m.partido_id=? AND m.pagado=0 ORDER BY j.nombre""", (pid_f3,))
+                    nuevos_pagos_cuota[int(row['id'])] = (float(row['monto_pagado']), float(row['monto']),
+                                                          paga_ahora, cuota_pendiente, jid)
+                    # Guardar multas para pago proporcional
+                    for _, mrow in multas_jug.iterrows():
+                        nuevas_multas[int(mrow['id'])] = (float(mrow['mp']), float(mrow['monto']), paga_ahora)
 
-            nuevas_multas = {}
-            if len(multas_df) > 0:
-                st.markdown("**⚠️ Multas por tarjetas**")
-                for _, row in multas_df.iterrows():
-                    deuda_m = float(row['monto']) - float(row['monto_pagado'])
-                    mc_nom, mc_debe, mc_paga = st.columns([3, 2, 2])
-                    with mc_nom:
-                        st.markdown(f"**{row['nombre']}** — {row['concepto']}")
-                    with mc_debe:
-                        st.markdown(f"Debe: <span style='color:#cc0000;font-weight:700;'>${deuda_m:,.2f}</span>", unsafe_allow_html=True)
-                    with mc_paga:
-                        paga_m = st.number_input("Paga ahora $", min_value=0.0,
-                            max_value=float(deuda_m), value=0.0, step=0.5,
-                            key=f"f3_multa_{row['id']}", label_visibility="visible")
-                    nuevas_multas[int(row['id'])] = (float(row['monto_pagado']), float(row['monto']), paga_m)
+                    st.markdown("<hr style='margin:4px 0;border-color:#eeeeee;'>", unsafe_allow_html=True)
 
             # ── Gasto / ingreso adicional ─────────────────────────────────────
             st.markdown("**➕ Gasto / ingreso adicional del partido**")
@@ -1911,18 +1895,31 @@ if IS_ADMIN:
                                 cambios += 1
 
                 # Multas con pago parcial
-                for multa_id, (ya_pagado, monto_total, paga_ahora) in nuevas_multas.items():
-                    if paga_ahora > 0:
-                        nuevo_total_pagado = ya_pagado + paga_ahora
-                        saldado = nuevo_total_pagado >= monto_total - 0.001
+                # Multas — se pagan con el excedente después de la cuota
+                # nuevas_multas tiene (ya_pagado, monto_total, paga_total_jugador)
+                # El pago ya fue aplicado a la cuota arriba; aquí aplicamos lo que sobre
+                for multa_id, (ya_pagado_m, monto_total_m, paga_total_j) in nuevas_multas.items():
+                    if paga_total_j <= 0:
+                        continue
+                    # Calcular cuánto se usó en la cuota del mismo jugador
+                    # Para simplificar: si paga_total_j > cuota_pendiente, el exceso va a multa
+                    mr = q("SELECT jugador_id, concepto FROM multas WHERE id=?", (multa_id,)).iloc[0]
+                    jid_m = int(mr['jugador_id'])
+                    cuota_row = q("SELECT monto, COALESCE(monto_pagado,0) as mp FROM pagos WHERE partido_id=? AND jugador_id=?",
+                                  (pid_f3, jid_m))
+                    cuota_pend = float(cuota_row.iloc[0]['monto']) - float(cuota_row.iloc[0]['mp']) if len(cuota_row)>0 else 0.0
+                    pago_para_multa = max(0.0, paga_total_j - cuota_pend)
+                    debe_multa = monto_total_m - ya_pagado_m
+                    pago_multa = min(pago_para_multa, debe_multa)
+                    if pago_multa > 0.001:
+                        nuevo_mp_m = ya_pagado_m + pago_multa
+                        saldado_m = nuevo_mp_m >= monto_total_m - 0.001
                         conn.execute("UPDATE multas SET monto_pagado=?, pagado=? WHERE id=?",
-                                     (nuevo_total_pagado, int(saldado), multa_id))
-                        mr = q("SELECT jugador_id, concepto FROM multas WHERE id=?", (multa_id,)).iloc[0]
-                        jn = q("SELECT nombre FROM jugadores WHERE id=?", (int(mr['jugador_id']),)).iloc[0]['nombre']
+                                     (nuevo_mp_m, int(saldado_m), multa_id))
+                        jn = q("SELECT nombre FROM jugadores WHERE id=?", (jid_m,)).iloc[0]['nombre']
                         conn.execute("INSERT INTO caja (partido_id,concepto,monto,fecha) VALUES (?,?,?,?)",
-                            (pid_f3,
-                             f"Multa {jn} — {mr['concepto']}" + (" (parcial)" if not saldado else ""),
-                             paga_ahora, str(date.today())))
+                            (pid_f3, f"Multa {jn} — {mr['concepto']}" + ("" if saldado_m else " (parcial)"),
+                             pago_multa, str(date.today())))
                         cambios += 1
 
                 if f3_concepto.strip():
