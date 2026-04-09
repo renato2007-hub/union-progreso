@@ -1284,6 +1284,32 @@ if IS_ADMIN:
     jugadores     = get_jugadores()
     nombres       = jugadores['nombre'].tolist()
 
+    # ── Botón Nuevo Partido ───────────────────────────────────────────────
+    col_np, col_info = st.columns([2, 5])
+    with col_np:
+        if st.button("➕ NUEVO PARTIDO", type="primary", key="btn_nuevo_partido"):
+            # Limpiar todo el estado del formulario de partido
+            keys_limpiar = [k for k in st.session_state.keys()
+                            if any(k.startswith(p) for p in [
+                                'f1_', 'f2_', 'f3_', 'f4_', 'sel_f',
+                                'tarjetas_f2_', 'multa_am_', 'multa_dam_',
+                                'multa_ro_', 'ntj_', 'ntt_', 'ntm_', 'add_tarj_',
+                                'ultimo_pid', 'f1_draft'
+                            ])]
+            for k in keys_limpiar:
+                del st.session_state[k]
+            st.success("✅ Formulario limpio. Ingresa los datos del nuevo partido.")
+            st.rerun()
+    with col_info:
+        if partidos_list is not None and len(partidos_list) > 0:
+            ult = partidos_list.iloc[0]
+            st.markdown(f"<small style='color:#7a3030;'>Último partido registrado: "
+                        f"<b>{ult['fecha']} vs {ult['rival']}</b> — "
+                        f"{int(ult['goles_favor'] or 0)}:{int(ult['goles_contra'] or 0)}</small>",
+                        unsafe_allow_html=True)
+
+    st.markdown("---")
+
     # ════════════════════════════════════════════════════════════════════
     # FASE 1 — ALINEACIÓN (antes del partido)
     # ════════════════════════════════════════════════════════════════════
