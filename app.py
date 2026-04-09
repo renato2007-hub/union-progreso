@@ -499,11 +499,71 @@ def generar_pdf_partido(pid):
 
 # ─── PAGE CONFIG ───────────────────────────────────────────────────────────────
 st.set_page_config(
-    page_title="⚽ Mi Equipo",
+    page_title="⚽ Unión y Progreso",
     page_icon="⚽",
     layout="wide",
     initial_sidebar_state="collapsed",
 )
+
+# ─── LOGIN ─────────────────────────────────────────────────────────────────────
+# Las contraseñas se leen desde Streamlit Secrets (seguro).
+# En local usa los valores por defecto si no hay secrets configurados.
+try:
+    PASS_ADMIN   = st.secrets["PASS_ADMIN"]
+    PASS_JUGADOR = st.secrets["PASS_JUGADOR"]
+except Exception:
+    # Valores por defecto para desarrollo local
+    PASS_ADMIN   = "Renato"
+    PASS_JUGADOR = "Progreso"
+
+USUARIOS = {
+    "admin":   {"password": PASS_ADMIN,   "rol": "admin"},
+    "jugador": {"password": PASS_JUGADOR, "rol": "jugador"},
+}
+
+def login_screen():
+    st.markdown("""
+    <div style="max-width:380px;margin:60px auto 0 auto;text-align:center;">
+      <div style="font-family:'Bebas Neue',sans-serif;font-size:52px;
+                  color:#f0c040;letter-spacing:4px;">⚽</div>
+      <div style="font-family:'Bebas Neue',sans-serif;font-size:32px;
+                  color:#f0c040;letter-spacing:3px;">UNIÓN Y PROGRESO</div>
+      <div style="color:#d4b8b8;font-size:12px;letter-spacing:2px;
+                  margin-bottom:32px;">BARRIO LA LIBERTAD</div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    with st.form("login_form"):
+        st.markdown("<div style='max-width:380px;margin:0 auto;'>", unsafe_allow_html=True)
+        usuario  = st.text_input("👤 Usuario", placeholder="Ingresa tu usuario")
+        password = st.text_input("🔑 Contraseña", type="password", placeholder="Ingresa tu contraseña")
+        entrar   = st.form_submit_button("ENTRAR", use_container_width=True, type="primary")
+        st.markdown("</div>", unsafe_allow_html=True)
+
+        if entrar:
+            u = usuario.strip().lower()
+            if u in USUARIOS and USUARIOS[u]["password"] == password:
+                st.session_state["usuario"] = u
+                st.session_state["rol"]     = USUARIOS[u]["rol"]
+                st.rerun()
+            else:
+                st.error("Usuario o contraseña incorrectos.")
+
+if "usuario" not in st.session_state:
+    login_screen()
+    st.stop()
+
+# Botón de cerrar sesión en sidebar
+with st.sidebar:
+    rol_actual = st.session_state.get("rol", "jugador")
+    icono_rol  = "🔐 Admin" if rol_actual == "admin" else "👤 Jugador"
+    st.markdown(f"**{icono_rol}** — {st.session_state['usuario']}")
+    if st.button("🚪 Cerrar sesión"):
+        for k in ["usuario", "rol"]:
+            st.session_state.pop(k, None)
+        st.rerun()
+
+IS_ADMIN = st.session_state.get("rol") == "admin"
 
 # ─── CUSTOM CSS ────────────────────────────────────────────────────────────────
 st.markdown("""
@@ -921,13 +981,28 @@ st.markdown("""
 </div>
 """, unsafe_allow_html=True)
 
-# ─── TABS ──────────────────────────────────────────────────────────────────────
-tabs = st.tabs(["🏠 INICIO", "👥 JUGADORES", "⚽ PARTIDO", "💰 FINANZAS", "🟨 DISCIPLINA", "📊 HISTORIAL"])
+# ─── TABS (según rol) ──────────────────────────────────────────────────────────
+if IS_ADMIN:
+    tabs = st.tabs(["🏠 INICIO", "👥 JUGADORES", "⚽ PARTIDO", "💰 FINANZAS", "🟨 DISCIPLINA", "📊 HISTORIAL"])
+    TAB_INICIO    = tabs[0]
+    TAB_JUGADORES = tabs[1]
+    TAB_PARTIDO   = tabs[2]
+    TAB_FINANZAS  = tabs[3]
+    TAB_DISCIPLINA= tabs[4]
+    TAB_HISTORIAL = tabs[5]
+else:
+    tabs_j = st.tabs(["🏠 INICIO", "🟨 DISCIPLINA", "📊 HISTORIAL"])
+    TAB_INICIO    = tabs_j[0]
+    TAB_JUGADORES = None
+    TAB_PARTIDO   = None
+    TAB_FINANZAS  = None
+    TAB_DISCIPLINA= tabs_j[1]
+    TAB_HISTORIAL = tabs_j[2]
 
 # ══════════════════════════════════════════════════════════════════════════════
 # TAB 1 — INICIO
 # ══════════════════════════════════════════════════════════════════════════════
-with tabs[0]:
+with TAB_INICIO:
     jugadores = get_jugadores()
     partidos = get_partidos()
     saldo = saldo_caja()
@@ -1003,9 +1078,10 @@ with tabs[0]:
         </div>""", unsafe_allow_html=True)
 
 # ══════════════════════════════════════════════════════════════════════════════
-# TAB 2 — JUGADORES
+# TAB 2 — JUGADORES (solo admin)
 # ══════════════════════════════════════════════════════════════════════════════
-with tabs[1]:
+if IS_ADMIN:
+ with TAB_JUGADORES:
     st.markdown('<div class="section-header">👥 PLANTEL</div>', unsafe_allow_html=True)
     jugadores = get_jugadores()
 
@@ -1102,7 +1178,8 @@ with tabs[1]:
 # ══════════════════════════════════════════════════════════════════════════════
 # TAB 3 — PARTIDO (4 FASES)
 # ══════════════════════════════════════════════════════════════════════════════
-with tabs[2]:
+if IS_ADMIN:
+ with TAB_PARTIDO:
 
     MOTIVO_LABELS = {
         'roja_directa':         '🟥 Roja directa (2 partidos)',
@@ -1683,7 +1760,8 @@ with tabs[2]:
 # ══════════════════════════════════════════════════════════════════════════════
 # TAB 4 — FINANZAS
 # ══════════════════════════════════════════════════════════════════════════════
-with tabs[3]:
+if IS_ADMIN:
+ with TAB_FINANZAS:
     saldo = saldo_caja()
     partidos = get_partidos()
     c1, c2, c3 = st.columns(3)
@@ -1753,7 +1831,7 @@ with tabs[3]:
 # ══════════════════════════════════════════════════════════════════════════════
 # TAB 5 — DISCIPLINA
 # ══════════════════════════════════════════════════════════════════════════════
-with tabs[4]:
+with TAB_DISCIPLINA:
     st.markdown('<div class="section-header">🟨 TARJETAS Y SANCIONES</div>', unsafe_allow_html=True)
     st.markdown("""<div class="alerta-box" style="font-size:13px;">
     📋 <b>Reglas:</b> 🟨×5 acumuladas = 1 partido &nbsp;|&nbsp;
@@ -1808,7 +1886,7 @@ with tabs[4]:
 # ══════════════════════════════════════════════════════════════════════════════
 # TAB 6 — HISTORIAL Y ESTADÍSTICAS
 # ══════════════════════════════════════════════════════════════════════════════
-with tabs[5]:
+with TAB_HISTORIAL:
     partidos = get_partidos()
 
     if len(partidos) == 0:
