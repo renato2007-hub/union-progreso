@@ -1320,6 +1320,30 @@ if IS_ADMIN:
     elif len(f1_titulares) > 0:
         st.caption(f"{len(f1_titulares)}/11 titulares seleccionados.")
 
+    # ── Alertas de suspensión en tiempo real ─────────────────────────────
+    suspendidos_en_lista = []
+    en_riesgo_en_lista   = []
+    for nombre in f1_titulares:
+        rows = jugadores[jugadores['nombre']==nombre]
+        if len(rows) == 0: continue
+        jid = int(rows.iloc[0]['id'])
+        sancion = esta_sancionado(jid)
+        if "Suspendido" in sancion:
+            suspendidos_en_lista.append((nombre, sancion))
+        elif "riesgo" in sancion:
+            en_riesgo_en_lista.append((nombre, sancion))
+
+    if suspendidos_en_lista:
+        for nombre, sancion in suspendidos_en_lista:
+            st.markdown(f'<div class="peligro-box">🚫 <b>{nombre}</b> está <b>SUSPENDIDO</b> — {sancion.replace("🔴 Suspendido — ","")}<br>'
+                        f'<small>No puede jugar. Quítalo de la alineación.</small></div>',
+                        unsafe_allow_html=True)
+    if en_riesgo_en_lista:
+        for nombre, sancion in en_riesgo_en_lista:
+            st.markdown(f'<div class="alerta-box">⚠️ <b>{nombre}</b> — {sancion}<br>'
+                        f'<small>Puede jugar pero cuidado con las tarjetas.</small></div>',
+                        unsafe_allow_html=True)
+
     st.info("💡 Los cambios (quién sale y quién entra) se registran en la **Fase 2** después de guardar la alineación.")
     f1_entraron = []
     cambios_data = []
@@ -1331,6 +1355,9 @@ if IS_ADMIN:
             st.error("⚠️ Selecciona al menos un titular.")
         elif len(f1_titulares) > 11:
             st.error(f"⚠️ Máximo 11 titulares. Tienes {len(f1_titulares)}, quita {len(f1_titulares)-11}.")
+        elif suspendidos_en_lista:
+            nombres_susp = ", ".join([n for n, _ in suspendidos_en_lista])
+            st.error(f"🚫 No puedes guardar la alineación. Jugador(es) suspendido(s): {nombres_susp}. Quítalos antes de guardar.")
         else:
             # ── Validar partido duplicado (misma fecha + mismo rival) ───
             duplicado = q("""SELECT id FROM partidos
@@ -1451,6 +1478,14 @@ if IS_ADMIN:
                                               value=default_min, key=f"f2_minc_{i}")
                 cambios_data_f2.append((sale_f2, entra_f2, min_f2))
                 nombres_ya_entran_f2.append(entra_f2)
+                # Alerta si el jugador que entra está suspendido
+                rows_entra = jugadores[jugadores['nombre']==entra_f2]
+                if len(rows_entra) > 0:
+                    sanc_entra = esta_sancionado(int(rows_entra.iloc[0]['id']))
+                    if "Suspendido" in sanc_entra:
+                        st.markdown(f'<div class="peligro-box">🚫 <b>{entra_f2}</b> está <b>SUSPENDIDO</b> — {sanc_entra.replace("🔴 Suspendido — ","")}<br>'
+                                    f'<small>No puede ingresar al partido.</small></div>',
+                                    unsafe_allow_html=True)
 
             # Resultado
             f2c1, f2c2 = st.columns(2)
