@@ -1308,8 +1308,14 @@ if IS_ADMIN:
     }
 
     st.markdown("**⚽ Titulares**")
+    # Limpiar session_state si tiene nombres que ya no existen en el plantel
+    if 'f1_tit' in st.session_state:
+        st.session_state['f1_tit'] = [n for n in st.session_state['f1_tit'] if n in nombres]
+    if 'f1_draft' in st.session_state and 'titulares' in st.session_state['f1_draft']:
+        st.session_state['f1_draft']['titulares'] = [n for n in st.session_state['f1_draft']['titulares'] if n in nombres]
+
     f1_titulares = st.multiselect("Selecciona titulares (máximo 11)", nombres, key="f1_tit",
-                                   default=draft.get('titulares', []))
+                                   default=[n for n in draft.get('titulares', []) if n in nombres])
     st.session_state['f1_draft']['titulares'] = f1_titulares
 
     # Validación visual del conteo
