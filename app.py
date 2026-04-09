@@ -1653,14 +1653,23 @@ if IS_ADMIN:
                             c.execute("""INSERT INTO multas (partido_id,jugador_id,concepto,monto,monto_pagado,pagado)
                                          VALUES (?,?,?,?,0,0)""",
                                       (pid_f2, jid, concepto_m, monto_m))
+                            # Registrar gasto en caja (el club paga la multa al árbitro)
+                            nombre_j = t['jugador']
+                            c.execute("INSERT INTO caja (partido_id,concepto,monto,fecha) VALUES (?,?,?,?)",
+                                      (pid_f2, f"Gasto multa {nombre_j} ({concepto_m})", -monto_m, str(date.today())))
                         jugadores_multa_am_procesados.add(t['jugador'])
 
                     if t['tipo'] == 'roja':
                         monto_m = st.session_state.get(key_multa_ro, 0.0)
                         if monto_m > 0:
+                            concepto_ro = f"Multa roja directa vs {p_data['rival']}"
                             c.execute("""INSERT INTO multas (partido_id,jugador_id,concepto,monto,monto_pagado,pagado)
                                          VALUES (?,?,?,?,0,0)""",
-                                      (pid_f2, jid, f"Multa roja directa vs {p_data['rival']}", monto_m))
+                                      (pid_f2, jid, concepto_ro, monto_m))
+                            # Registrar gasto en caja
+                            nombre_j = t['jugador']
+                            c.execute("INSERT INTO caja (partido_id,concepto,monto,fecha) VALUES (?,?,?,?)",
+                                      (pid_f2, f"Gasto multa {nombre_j} ({concepto_ro})", -monto_m, str(date.today())))
 
                 # Sanciones según conteo final
                 for nombre, cant in conteo_am_g.items():
