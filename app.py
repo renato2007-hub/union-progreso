@@ -1892,104 +1892,150 @@ with TAB_HISTORIAL:
     if len(partidos) == 0:
         st.info("Aún no hay partidos registrados.")
     else:
-        # ── EDITAR PARTIDO ──────────────────────────────────────────────────
-        st.markdown('<div class="section-header">✏️ EDITAR PARTIDO</div>', unsafe_allow_html=True)
-        st.caption("Selecciona un partido para corregir cualquier dato. Los cambios se guardan inmediatamente.")
+        # ── DEUDAS PENDIENTES (visible para todos) ──────────────────────────
+        st.markdown('<div class="section-header">💸 DEUDAS PENDIENTES DEL PLANTEL</div>', unsafe_allow_html=True)
+        st.caption("Jugadores con cuotas de arbitraje o multas por amonestaciones sin pagar.")
 
-        opciones_edit = [f"{r['fecha']} vs {r['rival']}" for _, r in partidos.iterrows()]
-        sel_edit = st.selectbox("Partido a editar", opciones_edit, key="sel_edit")
-        pid_edit = int(partidos.iloc[opciones_edit.index(sel_edit)]['id'])
-        pe = partidos[partidos['id']==pid_edit].iloc[0]
+        jugadores_deudas = get_jugadores()
+        deudas_tabla = []
+        for _, j in jugadores_deudas.iterrows():
+            jid = int(j['id'])
 
-        with st.expander("✏️ Abrir editor", expanded=False):
-            jugadores_all = get_jugadores()
-            nombres_all = jugadores_all['nombre'].tolist()
+            # Cuotas pendientes
+            cuotas = q("""SELECT pa.fecha, pa.rival,
+                                 (pg.monto - COALESCE(pg.monto_pagado,0)) as pendiente,
+                                 'Cuota arbitraje' as tipo
+                          FROM pagos pg JOIN partidos pa ON pg.partido_id=pa.id
+                          WHERE pg.jugador_id=? AND pg.pagado=0
+                            AND (pg.monto - COALESCE(pg.monto_pagado,0)) > 0.001""", (jid,))
 
-            ec1, ec2, ec3 = st.columns(3)
-            with ec1:
-                e_fecha = st.date_input("Fecha", value=date.fromisoformat(str(pe['fecha'])), key="e_fecha")
-                e_rival = st.text_input("Rival", value=str(pe['rival'] or ''), key="e_rival")
-            with ec2:
-                e_cancha = st.text_input("Cancha", value=str(pe['cancha'] or ''), key="e_cancha")
-                e_arb    = st.number_input("Costo árbitro ($)", min_value=0.0, step=0.5,
-                                            value=float(pe['costo_arbitraje'] or 0), key="e_arb")
-                e_agua   = st.number_input("Costo botellón ($)", min_value=0.0, step=0.5,
-                                            value=float(pe['costo_agua'] or 0), key="e_agua")
-            with ec3:
-                e_gf     = st.number_input("Goles a favor", min_value=0, step=1,
-                                            value=int(pe['goles_favor'] or 0), key="e_gf")
-                e_gc     = st.number_input("Goles en contra", min_value=0, step=1,
-                                            value=int(pe['goles_contra'] or 0), key="e_gc")
+            # Multas pendientes
+            multas_pend = q("""SELECT pa.fecha, pa.rival,
+                                      (m.monto - COALESCE(m.monto_pagado,0)) as pendiente,
+                                      m.concepto as tipo
+                               FROM multas m JOIN partidos pa ON m.partido_id=pa.id
+                               WHERE m.jugador_id=? AND m.pagado=0
+                                 AND (m.monto - COALESCE(m.monto_pagado,0)) > 0.001""", (jid,))
 
-            e_notas = st.text_area("Notas", value=str(pe['notas'] or ''), height=60, key="e_notas")
-            e_arbitral = st.text_area("Comentarios arbitrales", height=70,
-                                      value=str(pe.get('informe_arbitral','') or ''),
-                                      key="e_arbitral")
+            total_cuotas = float(cuotas['pendiente'].sum()) if len(cuotas) > 0 else 0.0
+            total_multas = float(multas_pend['pendiente'].sum()) if len(multas_pend) > 0 else 0.0
+            total = total_cuotas + total_multas
 
-            # Participantes actuales
-            partic_edit = q("""SELECT j.nombre, pa.rol FROM participaciones pa
-                               JOIN jugadores j ON pa.jugador_id=j.id
-                               WHERE pa.partido_id=? ORDER BY pa.rol DESC, j.nombre""", (pid_edit,))
-            tit_act = partic_edit[partic_edit['rol']=='titular']['nombre'].tolist()
-            cam_act = partic_edit[partic_edit['rol']=='cambio']['nombre'].tolist()
+            if total > 0.001:
+                detalle_parts = []
+                for _, row in cuotas.iterrows():
+                    detalle_parts.append(f"Arbitraje vs {row['rival']} (${row['pendiente']:,.2f})")
+                for _, row in multas_pend.iterrows():
+                    detalle_parts.append(f"{row['tipo']} vs {row['rival']} (${row['pendiente']:,.2f})")
+                deudas_tabla.append({
+                    "Jugador": j['nombre'],
+                    "Cuotas arbitraje": f"${total_cuotas:,.2f}" if total_cuotas > 0 else "—",
+                    "Multas": f"${total_multas:,.2f}" if total_multas > 0 else "—",
+                    "Total debe": f"${total:,.2f}",
+                    "Detalle": " | ".join(detalle_parts),
+                })
 
-            st.markdown("**Titulares**")
-            e_titulares = st.multiselect("Titulares", nombres_all, default=tit_act, key="e_tit")
-            st.markdown("**Jugadores al cambio**")
-            e_cambios   = st.multiselect("Cambios", nombres_all, default=cam_act, key="e_cam")
-
-            # Validación duplicado al editar (excluyendo el propio partido)
-            e_col1, e_col2 = st.columns(2)
-            with e_col1:
-                if st.button("💾 Guardar cambios del partido", type="primary", key="btn_edit_partido"):
-                    # Verificar duplicado solo si cambia fecha o rival
-                    dup = q("""SELECT id FROM partidos
-                               WHERE fecha=? AND LOWER(rival)=LOWER(?) AND id!=?""",
-                            (str(e_fecha), e_rival.strip(), pid_edit))
-                    if len(dup) > 0:
-                        st.error(f"⚠️ Ya existe otro partido el {e_fecha} contra '{e_rival.strip()}'.")
-                    else:
-                        conn = get_conn()
-                        conn.execute("""UPDATE partidos SET fecha=?,rival=?,cancha=?,goles_favor=?,
-                                       goles_contra=?,costo_arbitraje=?,costo_agua=?,notas=?,informe_arbitral=?
-                                       WHERE id=?""",
-                                     (str(e_fecha), e_rival.strip(), e_cancha,
-                                      e_gf, e_gc, e_arb, e_agua, e_notas, e_arbitral, pid_edit))
-                        # Actualizar participaciones
-                        conn.execute("DELETE FROM participaciones WHERE partido_id=?", (pid_edit,))
-                        for nombre in e_titulares:
-                            rows = jugadores_all[jugadores_all['nombre']==nombre]
-                            if len(rows)>0:
-                                conn.execute("INSERT INTO participaciones (partido_id,jugador_id,rol) VALUES (?,?,?)",
-                                             (pid_edit, int(rows.iloc[0]['id']), 'titular'))
-                        for nombre in e_cambios:
-                            rows = jugadores_all[jugadores_all['nombre']==nombre]
-                            if len(rows)>0:
-                                conn.execute("INSERT INTO participaciones (partido_id,jugador_id,rol) VALUES (?,?,?)",
-                                             (pid_edit, int(rows.iloc[0]['id']), 'cambio'))
-                        # Actualizar gasto en caja
-                        conn.execute("DELETE FROM caja WHERE partido_id=? AND concepto LIKE 'Gastos partido%'",
-                                     (pid_edit,))
-                        if e_arb + e_agua > 0:
-                            conn.execute("INSERT INTO caja (partido_id,concepto,monto,fecha) VALUES (?,?,?,?)",
-                                         (pid_edit, f"Gastos partido vs {e_rival.strip()}",
-                                          -(e_arb+e_agua), str(e_fecha)))
-                        conn.commit(); conn.close()
-                        st.success("✅ Partido actualizado correctamente.")
-                        st.rerun()
-            with e_col2:
-                if st.button("🗑️ Eliminar este partido", key=f"del_edit_{pid_edit}"):
-                    conn = get_conn()
-                    for tbl, col in [('participaciones','partido_id'),('tarjetas','partido_id'),
-                                     ('pagos','partido_id'),('caja','partido_id'),
-                                     ('goles','partido_id'),('cambios','partido_id'),
-                                     ('multas','partido_id'),('sanciones','partido_origen_id')]:
-                        conn.execute(f"DELETE FROM {tbl} WHERE {col}=?", (pid_edit,))
-                    conn.execute("DELETE FROM partidos WHERE id=?", (pid_edit,))
-                    conn.commit(); conn.close()
-                    st.success("Partido eliminado."); st.rerun()
+        if deudas_tabla:
+            st.dataframe(pd.DataFrame(deudas_tabla), use_container_width=True, hide_index=True)
+        else:
+            st.markdown('<div class="ok-box">✅ Todos los jugadores están al día con sus pagos.</div>',
+                        unsafe_allow_html=True)
 
         st.markdown("---")
+
+        # ── EDITAR PARTIDO (solo admin) ─────────────────────────────────────
+        if IS_ADMIN:
+            st.markdown('<div class="section-header">✏️ EDITAR PARTIDO</div>', unsafe_allow_html=True)
+            st.caption("Selecciona un partido para corregir cualquier dato.")
+
+            opciones_edit = [f"{r['fecha']} vs {r['rival']}" for _, r in partidos.iterrows()]
+            sel_edit = st.selectbox("Partido a editar", opciones_edit, key="sel_edit")
+            pid_edit = int(partidos.iloc[opciones_edit.index(sel_edit)]['id'])
+            pe = partidos[partidos['id']==pid_edit].iloc[0]
+
+            with st.expander("✏️ Abrir editor", expanded=False):
+                jugadores_all = get_jugadores()
+                nombres_all = jugadores_all['nombre'].tolist()
+
+                ec1, ec2, ec3 = st.columns(3)
+                with ec1:
+                    e_fecha = st.date_input("Fecha", value=date.fromisoformat(str(pe['fecha'])), key="e_fecha")
+                    e_rival = st.text_input("Rival", value=str(pe['rival'] or ''), key="e_rival")
+                with ec2:
+                    e_cancha = st.text_input("Cancha", value=str(pe['cancha'] or ''), key="e_cancha")
+                    e_arb    = st.number_input("Costo árbitro ($)", min_value=0.0, step=0.5,
+                                                value=float(pe['costo_arbitraje'] or 0), key="e_arb")
+                    e_agua   = st.number_input("Costo botellón ($)", min_value=0.0, step=0.5,
+                                                value=float(pe['costo_agua'] or 0), key="e_agua")
+                with ec3:
+                    e_gf = st.number_input("Goles a favor", min_value=0, step=1,
+                                            value=int(pe['goles_favor'] or 0), key="e_gf")
+                    e_gc = st.number_input("Goles en contra", min_value=0, step=1,
+                                            value=int(pe['goles_contra'] or 0), key="e_gc")
+
+                e_notas    = st.text_area("Notas", value=str(pe['notas'] or ''), height=60, key="e_notas")
+                e_arbitral = st.text_area("Comentarios arbitrales", height=70,
+                                          value=str(pe.get('informe_arbitral','') or ''),
+                                          key="e_arbitral")
+
+                partic_edit = q("""SELECT j.nombre, pa.rol FROM participaciones pa
+                                   JOIN jugadores j ON pa.jugador_id=j.id
+                                   WHERE pa.partido_id=? ORDER BY pa.rol DESC, j.nombre""", (pid_edit,))
+                tit_act = partic_edit[partic_edit['rol']=='titular']['nombre'].tolist()
+                cam_act = partic_edit[partic_edit['rol']=='cambio']['nombre'].tolist()
+
+                st.markdown("**Titulares**")
+                e_titulares = st.multiselect("Titulares", nombres_all, default=tit_act, key="e_tit")
+                st.markdown("**Jugadores al cambio**")
+                e_cambios   = st.multiselect("Cambios", nombres_all, default=cam_act, key="e_cam")
+
+                e_col1, e_col2 = st.columns(2)
+                with e_col1:
+                    if st.button("💾 Guardar cambios del partido", type="primary", key="btn_edit_partido"):
+                        dup = q("""SELECT id FROM partidos
+                                   WHERE fecha=? AND LOWER(rival)=LOWER(?) AND id!=?""",
+                                (str(e_fecha), e_rival.strip(), pid_edit))
+                        if len(dup) > 0:
+                            st.error(f"⚠️ Ya existe otro partido el {e_fecha} contra '{e_rival.strip()}'.")
+                        else:
+                            conn = get_conn()
+                            conn.execute("""UPDATE partidos SET fecha=?,rival=?,cancha=?,goles_favor=?,
+                                           goles_contra=?,costo_arbitraje=?,costo_agua=?,notas=?,informe_arbitral=?
+                                           WHERE id=?""",
+                                         (str(e_fecha), e_rival.strip(), e_cancha,
+                                          e_gf, e_gc, e_arb, e_agua, e_notas, e_arbitral, pid_edit))
+                            conn.execute("DELETE FROM participaciones WHERE partido_id=?", (pid_edit,))
+                            for nombre in e_titulares:
+                                rows = jugadores_all[jugadores_all['nombre']==nombre]
+                                if len(rows)>0:
+                                    conn.execute("INSERT INTO participaciones (partido_id,jugador_id,rol) VALUES (?,?,?)",
+                                                 (pid_edit, int(rows.iloc[0]['id']), 'titular'))
+                            for nombre in e_cambios:
+                                rows = jugadores_all[jugadores_all['nombre']==nombre]
+                                if len(rows)>0:
+                                    conn.execute("INSERT INTO participaciones (partido_id,jugador_id,rol) VALUES (?,?,?)",
+                                                 (pid_edit, int(rows.iloc[0]['id']), 'cambio'))
+                            conn.execute("DELETE FROM caja WHERE partido_id=? AND concepto LIKE 'Gastos partido%'",
+                                         (pid_edit,))
+                            if e_arb + e_agua > 0:
+                                conn.execute("INSERT INTO caja (partido_id,concepto,monto,fecha) VALUES (?,?,?,?)",
+                                             (pid_edit, f"Gastos partido vs {e_rival.strip()}",
+                                              -(e_arb+e_agua), str(e_fecha)))
+                            conn.commit(); conn.close()
+                            st.success("✅ Partido actualizado."); st.rerun()
+                with e_col2:
+                    if st.button("🗑️ Eliminar este partido", key=f"del_edit_{pid_edit}"):
+                        conn = get_conn()
+                        for tbl, col in [('participaciones','partido_id'),('tarjetas','partido_id'),
+                                         ('pagos','partido_id'),('caja','partido_id'),
+                                         ('goles','partido_id'),('cambios','partido_id'),
+                                         ('multas','partido_id'),('sanciones','partido_origen_id')]:
+                            conn.execute(f"DELETE FROM {tbl} WHERE {col}=?", (pid_edit,))
+                        conn.execute("DELETE FROM partidos WHERE id=?", (pid_edit,))
+                        conn.commit(); conn.close()
+                        st.success("Partido eliminado."); st.rerun()
+
+            st.markdown("---")
         st.markdown('<div class="section-header">📈 ESTADÍSTICAS GENERALES</div>', unsafe_allow_html=True)
 
         total_p  = len(partidos)
@@ -2161,25 +2207,26 @@ with TAB_HISTORIAL:
                         min_str = f"min. {int(g['minuto'])}" if g['minuto'] else ""
                         st.markdown(f"&nbsp;&nbsp;⚽ **{g['nombre']}** {min_str}")
 
-                if st.button("🗑️ Eliminar partido", key=f"del_{pid}"):
-                    conn = get_conn()
-                    for tbl, col in [('participaciones','partido_id'),('tarjetas','partido_id'),
-                                     ('pagos','partido_id'),('caja','partido_id'),
-                                     ('goles','partido_id'),('cambios','partido_id'),
-                                     ('multas','partido_id'),('sanciones','partido_origen_id')]:
-                        conn.execute(f"DELETE FROM {tbl} WHERE {col}=?", (pid,))
-                    conn.execute("DELETE FROM partidos WHERE id=?", (pid,))
-                    conn.commit(); conn.close()
-                    st.success("Partido eliminado"); st.rerun()
+                if IS_ADMIN:
+                    if st.button("🗑️ Eliminar partido", key=f"del_{pid}"):
+                        conn = get_conn()
+                        for tbl, col in [('participaciones','partido_id'),('tarjetas','partido_id'),
+                                         ('pagos','partido_id'),('caja','partido_id'),
+                                         ('goles','partido_id'),('cambios','partido_id'),
+                                         ('multas','partido_id'),('sanciones','partido_origen_id')]:
+                            conn.execute(f"DELETE FROM {tbl} WHERE {col}=?", (pid,))
+                        conn.execute("DELETE FROM partidos WHERE id=?", (pid,))
+                        conn.commit(); conn.close()
+                        st.success("Partido eliminado"); st.rerun()
 
-                # Botón de descarga PDF
-                pdf_bytes = generar_pdf_partido(pid)
-                if pdf_bytes:
-                    nombre_pdf = f"informe_{p['fecha']}_vs_{(p['rival'] or 'rival').replace(' ','_')}.pdf"
-                    st.download_button(
-                        label="📄 Descargar informe PDF",
-                        data=pdf_bytes,
-                        file_name=nombre_pdf,
-                        mime="application/pdf",
-                        key=f"pdf_{pid}"
-                    )
+                    # Botón de descarga PDF — solo admin
+                    pdf_bytes = generar_pdf_partido(pid)
+                    if pdf_bytes:
+                        nombre_pdf = f"informe_{p['fecha']}_vs_{(p['rival'] or 'rival').replace(' ','_')}.pdf"
+                        st.download_button(
+                            label="📄 Descargar informe PDF",
+                            data=pdf_bytes,
+                            file_name=nombre_pdf,
+                            mime="application/pdf",
+                            key=f"pdf_{pid}"
+                        )
