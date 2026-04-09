@@ -1308,7 +1308,11 @@ if IS_ADMIN:
     }
 
     st.markdown("**⚽ Titulares**")
-    # Advertencia si supera 11
+    f1_titulares = st.multiselect("Selecciona titulares (máximo 11)", nombres, key="f1_tit",
+                                   default=draft.get('titulares', []))
+    st.session_state['f1_draft']['titulares'] = f1_titulares
+
+    # Validación visual del conteo
     if len(f1_titulares) > 11:
         st.error(f"⚠️ Tienes {len(f1_titulares)} titulares. El máximo es 11. Quita {len(f1_titulares)-11} jugador(es).")
     elif len(f1_titulares) == 11:
@@ -1316,11 +1320,6 @@ if IS_ADMIN:
     elif len(f1_titulares) > 0:
         st.caption(f"{len(f1_titulares)}/11 titulares seleccionados.")
 
-    f1_titulares = st.multiselect("Selecciona titulares (máximo 11)", nombres, key="f1_tit",
-                                   default=draft.get('titulares', []))
-    st.session_state['f1_draft']['titulares'] = f1_titulares
-
-    # Los cambios se registran en Fase 2, no aquí
     st.info("💡 Los cambios (quién sale y quién entra) se registran en la **Fase 2** después de guardar la alineación.")
     f1_entraron = []
     cambios_data = []
