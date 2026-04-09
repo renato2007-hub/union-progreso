@@ -816,6 +816,199 @@ def goles_jugador(jugador_id):
     r = q("SELECT COUNT(*) as c FROM goles WHERE jugador_id=?", (jugador_id,))
     return r['c'][0]
 
+# ─── CUSTOM CSS ────────────────────────────────────────────────────────────────
+st.markdown("""
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Nunito:wght@400;600;700;800&display=swap');
+
+:root {
+    --verde: #9b2335;
+    --verde-claro: #f0c040;
+    --verde-oscuro: #6b1020;
+    --blanco: #ffffff;
+    --gris: #d4b8b8;
+    --alerta: #f0c040;
+    --peligro: #ff6b6b;
+    --fondo: #1a0808;
+    --card: #2d1010;
+    --card2: #3d1515;
+    --borde: #6b2525;
+}
+
+html, body, [class*="css"] {
+    font-family: 'Nunito', sans-serif;
+    background-color: var(--fondo);
+    color: var(--blanco);
+}
+
+h1, h2, h3 { font-family: 'Bebas Neue', sans-serif; letter-spacing: 2px; }
+
+.stApp { background-color: var(--fondo); }
+
+.stTabs [data-baseweb="tab-list"] {
+    background: var(--card);
+    border-radius: 12px;
+    padding: 4px;
+    gap: 4px;
+    border: 1px solid var(--borde);
+}
+.stTabs [data-baseweb="tab"] {
+    background: transparent;
+    color: var(--gris);
+    border-radius: 8px;
+    font-family: 'Nunito', sans-serif;
+    font-weight: 700;
+    font-size: 13px;
+    padding: 8px 14px;
+}
+.stTabs [aria-selected="true"] {
+    background: var(--verde) !important;
+    color: white !important;
+}
+
+.metric-card {
+    background: var(--card);
+    border: 1px solid var(--borde);
+    border-radius: 14px;
+    padding: 18px 20px;
+    margin-bottom: 12px;
+}
+.metric-card .label {
+    font-size: 11px;
+    color: var(--gris);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin-bottom: 4px;
+}
+.metric-card .valor {
+    font-family: 'Bebas Neue', sans-serif;
+    font-size: 36px;
+    color: var(--verde-claro);
+    line-height: 1;
+}
+.metric-card .sub {
+    font-size: 12px;
+    color: var(--gris);
+    margin-top: 4px;
+}
+
+.jugador-card {
+    background: var(--card);
+    border: 1px solid var(--borde);
+    border-radius: 12px;
+    padding: 14px 16px;
+    margin-bottom: 8px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+.jugador-num {
+    background: var(--verde-oscuro);
+    color: var(--verde-claro);
+    font-family: 'Bebas Neue', sans-serif;
+    font-size: 22px;
+    width: 40px;
+    height: 40px;
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+}
+.badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 20px;
+    font-size: 11px;
+    font-weight: 700;
+    margin-right: 4px;
+}
+.badge-amarilla { background: #3d3000; color: #f0c040; border: 1px solid #f0c040; }
+.badge-roja     { background: #3d0000; color: #ff6b6b; border: 1px solid #ff6b6b; }
+.badge-deuda    { background: #3d1500; color: #ffaa55; border: 1px solid #ffaa55; }
+.badge-ok       { background: #003d1a; color: #50e080; border: 1px solid #50e080; }
+.badge-exento   { background: #003340; color: #55bbee; border: 1px solid #55bbee; }
+.badge-sancion  { background: #9b2335; color: white; }
+
+.stDataFrame { border-radius: 12px; overflow: hidden; }
+
+.stTextInput input, .stNumberInput input {
+    background: var(--card2) !important;
+    border: 1px solid var(--borde) !important;
+    color: #ffffff !important;
+    border-radius: 8px !important;
+}
+.stDateInput input {
+    background: var(--card2) !important;
+    border: 1px solid var(--borde) !important;
+    color: #ffffff !important;
+}
+label, .stTextInput label, .stNumberInput label, .stSelectbox label,
+.stDateInput label, .stMultiSelect label, .stTextArea label,
+div[data-testid="stWidgetLabel"] p { color: #ffffff !important; font-weight: 600 !important; }
+.stTextArea textarea {
+    background: var(--card2) !important;
+    border: 1px solid var(--borde) !important;
+    color: #ffffff !important;
+    border-radius: 8px !important;
+}
+.stMultiSelect div[data-baseweb="select"] { background: var(--card2) !important; }
+.stMultiSelect [data-baseweb="tag"] { background: var(--verde) !important; color: white !important; }
+.stMultiSelect input { color: #ffffff !important; }
+.stSelectbox div[data-baseweb="select"] > div { background: var(--card2) !important; color: #ffffff !important; }
+
+.stButton button {
+    background: var(--verde);
+    color: white;
+    border: none;
+    border-radius: 8px;
+    font-family: 'Nunito', sans-serif;
+    font-weight: 700;
+    padding: 8px 20px;
+    transition: background 0.2s;
+}
+.stButton button:hover { background: var(--verde-claro); color: #1a0808; }
+
+.section-header {
+    font-family: 'Bebas Neue', sans-serif;
+    font-size: 22px;
+    color: #f0c040;
+    letter-spacing: 2px;
+    border-bottom: 2px solid var(--borde);
+    padding-bottom: 6px;
+    margin: 18px 0 12px 0;
+}
+
+.alerta-box {
+    background: #2a1a00;
+    border: 1px solid var(--alerta);
+    border-radius: 10px;
+    padding: 12px 16px;
+    margin-bottom: 8px;
+    font-size: 14px;
+}
+.peligro-box {
+    background: #2a0000;
+    border: 1px solid var(--peligro);
+    border-radius: 10px;
+    padding: 12px 16px;
+    margin-bottom: 8px;
+    font-size: 14px;
+}
+.ok-box {
+    background: #002a10;
+    border: 1px solid var(--verde-claro);
+    border-radius: 10px;
+    padding: 12px 16px;
+    margin-bottom: 8px;
+    font-size: 14px;
+}
+
+div[data-testid="stCheckbox"] label { color: #ffffff !important; }
+div[data-testid="stMultiSelect"] span { background: var(--verde-oscuro) !important; color: #ffffff !important; }
+</style>
+""", unsafe_allow_html=True)
+
 # ─── HEADER ────────────────────────────────────────────────────────────────────
 st.markdown("""
 <div style="text-align:center; padding: 10px 0 20px 0;">
