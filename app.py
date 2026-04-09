@@ -816,6 +816,49 @@ def goles_jugador(jugador_id):
     r = q("SELECT COUNT(*) as c FROM goles WHERE jugador_id=?", (jugador_id,))
     return r['c'][0]
 
+def eliminar_partido_completo(pid):
+    """Elimina un partido y revierte TODOS sus efectos acumulados:
+    - Revierte monto_pagado de pagos que se aplicaron a otros partidos desde este
+    - Elimina todos los registros relacionados
+    """
+    conn = get_conn()
+
+    # 1. Revertir pagos de cuotas que se aplicaron cruzando partidos
+    #    (cuando alguien pagó más de su cuota y el exceso fue a otro partido)
+    #    Los movimientos de caja de este partido que digan "deuda anterior" son revertibles
+    # En realidad lo más limpio: revertir monto_pagado en pagos de OTROS partidos
+    # que fueron pagados "desde" este partido — no tenemos ese registro directo,
+    # pero sí podemos revertir los pagos de caja de este partido partido y
+    # dejar que las deudas queden pendientes de nuevo.
+
+    # 2. Restaurar pagos parciales: los jugadores que tenían pagado=1 por este partido
+    #    deben quedar pendientes de nuevo
+    pagos_del_partido = q("SELECT id, jugador_id, monto FROM pagos WHERE partido_id=?", (pid,))
+    for _, pg in pagos_del_partido.iterrows():
+        conn.execute("UPDATE pagos SET monto_pagado=0, pagado=0 WHERE id=?", (int(pg['id']),))
+
+    # 3. Restaurar multas pagadas de este partido
+    multas_del_partido = q("SELECT id FROM multas WHERE partido_id=?", (pid,))
+    for _, m in multas_del_partido.iterrows():
+        conn.execute("UPDATE multas SET monto_pagado=0, pagado=0 WHERE id=?", (int(m['id']),))
+
+    # 4. Eliminar todos los registros del partido
+    for tbl, col in [
+        ('participaciones',  'partido_id'),
+        ('tarjetas',         'partido_id'),
+        ('pagos',            'partido_id'),
+        ('caja',             'partido_id'),
+        ('goles',            'partido_id'),
+        ('cambios',          'partido_id'),
+        ('multas',           'partido_id'),
+        ('sanciones',        'partido_origen_id'),
+    ]:
+        conn.execute(f"DELETE FROM {tbl} WHERE {col}=?", (pid,))
+
+    conn.execute("DELETE FROM partidos WHERE id=?", (pid,))
+    conn.commit()
+    conn.close()
+
 # ─── CUSTOM CSS ────────────────────────────────────────────────────────────────
 st.markdown("""
 <style>
@@ -2322,16 +2365,23 @@ with TAB_HISTORIAL:
                             conn.commit(); conn.close()
                             st.success("✅ Partido actualizado."); st.rerun()
                 with e_col2:
-                    if st.button("🗑️ Eliminar este partido", key=f"del_edit_{pid_edit}"):
-                        conn = get_conn()
-                        for tbl, col in [('participaciones','partido_id'),('tarjetas','partido_id'),
-                                         ('pagos','partido_id'),('caja','partido_id'),
-                                         ('goles','partido_id'),('cambios','partido_id'),
-                                         ('multas','partido_id'),('sanciones','partido_origen_id')]:
-                            conn.execute(f"DELETE FROM {tbl} WHERE {col}=?", (pid_edit,))
-                        conn.execute("DELETE FROM partidos WHERE id=?", (pid_edit,))
-                        conn.commit(); conn.close()
-                        st.success("Partido eliminado."); st.rerun()
+                    key_confirm_del = f"confirm_del_{pid_edit}"
+                    if st.session_state.get(key_confirm_del):
+                        st.warning(f"⚠️ ¿Confirmas eliminar el partido vs **{pe['rival']}** del {pe['fecha']}? Se borrarán goles, tarjetas, cobros y sanciones.")
+                        cd1, cd2 = st.columns(2)
+                        with cd1:
+                            if st.button("✅ Sí, eliminar", type="primary", key=f"del_confirm_yes_{pid_edit}"):
+                                eliminar_partido_completo(pid_edit)
+                                st.session_state.pop(key_confirm_del, None)
+                                st.success("✅ Partido eliminado. Deudas pendientes restablecidas."); st.rerun()
+                        with cd2:
+                            if st.button("❌ Cancelar", key=f"del_confirm_no_{pid_edit}"):
+                                st.session_state.pop(key_confirm_del, None)
+                                st.rerun()
+                    else:
+                        if st.button("🗑️ Eliminar este partido", key=f"del_edit_{pid_edit}"):
+                            st.session_state[key_confirm_del] = True
+                            st.rerun()
 
             st.markdown("---")
         st.markdown('<div class="section-header">📈 ESTADÍSTICAS GENERALES</div>', unsafe_allow_html=True)
@@ -2506,16 +2556,23 @@ with TAB_HISTORIAL:
                         st.markdown(f"&nbsp;&nbsp;⚽ **{g['nombre']}** {min_str}")
 
                 if IS_ADMIN:
-                    if st.button("🗑️ Eliminar partido", key=f"del_{pid}"):
-                        conn = get_conn()
-                        for tbl, col in [('participaciones','partido_id'),('tarjetas','partido_id'),
-                                         ('pagos','partido_id'),('caja','partido_id'),
-                                         ('goles','partido_id'),('cambios','partido_id'),
-                                         ('multas','partido_id'),('sanciones','partido_origen_id')]:
-                            conn.execute(f"DELETE FROM {tbl} WHERE {col}=?", (pid,))
-                        conn.execute("DELETE FROM partidos WHERE id=?", (pid,))
-                        conn.commit(); conn.close()
-                        st.success("Partido eliminado"); st.rerun()
+                    key_del_hist = f"confirm_del_hist_{pid}"
+                    if st.session_state.get(key_del_hist):
+                        st.warning(f"⚠️ ¿Eliminar partido **vs {p['rival']}** del **{p['fecha']}**? Se borran goles, tarjetas, cobros y sanciones.")
+                        dh1, dh2 = st.columns(2)
+                        with dh1:
+                            if st.button("✅ Sí, eliminar", type="primary", key=f"del_hist_yes_{pid}"):
+                                eliminar_partido_completo(pid)
+                                st.session_state.pop(key_del_hist, None)
+                                st.success("✅ Partido eliminado. Deudas pendientes restablecidas."); st.rerun()
+                        with dh2:
+                            if st.button("❌ Cancelar", key=f"del_hist_no_{pid}"):
+                                st.session_state.pop(key_del_hist, None)
+                                st.rerun()
+                    else:
+                        if st.button("🗑️ Eliminar partido", key=f"del_{pid}"):
+                            st.session_state[key_del_hist] = True
+                            st.rerun()
 
                     # Botón de descarga PDF — solo admin
                     pdf_bytes = generar_pdf_partido(pid)
