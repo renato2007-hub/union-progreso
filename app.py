@@ -1020,6 +1020,39 @@ div[data-testid="stWidgetLabel"] p,
 label { color: #1a0808 !important; font-weight: 600 !important; }
 
 .stCaption { color: #7a3030 !important; }
+
+/* ── Bordes visibles en todos los campos de entrada ── */
+div[data-baseweb="input"] {
+    border: 1.5px solid #9b2335 !important;
+    border-radius: 6px !important;
+}
+div[data-baseweb="input"]:focus-within {
+    border: 2px solid #6b1020 !important;
+    box-shadow: 0 0 0 2px rgba(155,35,53,0.15) !important;
+}
+div[data-baseweb="select"] {
+    border: 1.5px solid #9b2335 !important;
+    border-radius: 6px !important;
+}
+div[data-baseweb="select"]:focus-within {
+    border: 2px solid #6b1020 !important;
+}
+div[data-baseweb="textarea"] {
+    border: 1.5px solid #9b2335 !important;
+    border-radius: 6px !important;
+}
+div[data-baseweb="textarea"]:focus-within {
+    border: 2px solid #6b1020 !important;
+}
+div[data-testid="stDateInput"] div[data-baseweb="input"] {
+    border: 1.5px solid #9b2335 !important;
+}
+div[data-testid="stNumberInput"] div[data-baseweb="input"] {
+    border: 1.5px solid #9b2335 !important;
+}
+div[data-testid="stMultiSelect"] div[data-baseweb="select"] {
+    border: 1.5px solid #9b2335 !important;
+}
 </style>
 """, unsafe_allow_html=True)
 
