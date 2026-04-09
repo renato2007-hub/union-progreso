@@ -2124,6 +2124,10 @@ if IS_ADMIN:
     # ════════════════════════════════════════════════════════════════════
     fase_header(4, "SANCIONES PENDIENTES", "Antes del próximo partido — marca suspensiones cumplidas", "#4a1060")
 
+    fase_header(4, "SANCIONES PENDIENTES", "Marca la suspensión DESPUÉS de que el jugador se pierda el partido", "#4a1060")
+
+    st.markdown('<div class="alerta-box" style="font-size:13px;">📋 <b>Cómo usar:</b> Cuando un jugador suspendido se pierde un partido, ven aquí y haz clic en <b>Marcar cumplida</b>. Si debe perderse 2 partidos, márcala cumplida 2 veces (una por cada partido perdido).</div>', unsafe_allow_html=True)
+
     sanciones_df = q("""
         SELECT s.id, j.nombre, s.motivo, s.partidos_suspension, s.partidos_cumplidos,
                p.fecha, p.rival, (s.partidos_suspension-s.partidos_cumplidos) as restantes
@@ -2135,27 +2139,54 @@ if IS_ADMIN:
         st.markdown('<div class="ok-box">✅ No hay suspensiones pendientes. Todos pueden jugar.</div>',
                     unsafe_allow_html=True)
     else:
-        st.markdown(f'<div class="alerta-box">⚠️ <b>{len(sanciones_df)}</b> sanción(es) pendiente(s). '
-                    f'Marca como cumplida después de que el jugador se pierda el partido.</div>',
+        st.markdown(f'<div class="peligro-box">🚫 <b>{len(sanciones_df)}</b> jugador(es) suspendido(s). '
+                    f'Marca como cumplida después de que se pierda el partido.</div>',
                     unsafe_allow_html=True)
         for _, s in sanciones_df.iterrows():
             sc1, sc2 = st.columns([5, 2])
             with sc1:
+                restantes = int(s['restantes'])
+                cumplidos = int(s['partidos_cumplidos'])
+                total_s   = int(s['partidos_suspension'])
+                progreso  = f"{cumplidos}/{total_s} partidos cumplidos"
                 st.markdown(
                     f'<div class="peligro-box">🚫 <b>{s["nombre"]}</b> — {MOTIVO_LABELS.get(s["motivo"],s["motivo"])}<br>'
-                    f'<small>Partido vs <b>{s["rival"]}</b> ({s["fecha"]}) — '
-                    f'<b>{int(s["restantes"])} partido(s)</b> pendiente(s) de {int(s["partidos_suspension"])}</small></div>',
+                    f'<small>Origen: partido vs <b>{s["rival"]}</b> ({s["fecha"]})<br>'
+                    f'Progreso: {progreso} — Faltan <b>{restantes} partido(s)</b> más por cumplir</small></div>',
                     unsafe_allow_html=True)
             with sc2:
                 kc = f"kc_{s['id']}"
                 if st.session_state.get(kc):
-                    if st.button("✅ Confirmar cumplida", key=f"cfm_{s['id']}"):
+                    st.markdown(f"<small style='color:#7a3030;'>¿Confirmas que <b>{s['nombre']}</b> se perdió un partido?</small>", unsafe_allow_html=True)
+                    if st.button("✅ Sí, cumplida", type="primary", key=f"cfm_{s['id']}"):
                         run("UPDATE sanciones SET partidos_cumplidos=? WHERE id=?",
                             (int(s['partidos_cumplidos'])+1, int(s['id'])))
+                        st.session_state[kc] = False
+                        nuevo_cumplido = int(s['partidos_cumplidos'])+1
+                        if nuevo_cumplido >= total_s:
+                            st.success(f"✅ {s['nombre']} ha cumplido su suspensión. Ya puede jugar.")
+                        else:
+                            st.info(f"Registrado. Le falta {total_s - nuevo_cumplido} partido(s) más.")
+                        st.rerun()
+                    if st.button("❌ Cancelar", key=f"canc_{s['id']}"):
                         st.session_state[kc] = False; st.rerun()
                 else:
-                    if st.button("Marcar cumplida", key=f"mc_{s['id']}"):
+                    if st.button(f"⬜ Marcar cumplida", key=f"mc_{s['id']}"):
                         st.session_state[kc] = True; st.rerun()
+
+    # Sanciones recientemente cumplidas (útil para verificar)
+    sanciones_ok = q("""
+        SELECT j.nombre, s.motivo, s.partidos_suspension, p.fecha, p.rival
+        FROM sanciones s JOIN jugadores j ON s.jugador_id=j.id
+        JOIN partidos p ON s.partido_origen_id=p.id
+        WHERE s.partidos_cumplidos>=s.partidos_suspension
+        ORDER BY p.fecha DESC LIMIT 5
+    """)
+    if len(sanciones_ok) > 0:
+        st.markdown("---")
+        st.markdown('<div class="section-header">✅ SUSPENSIONES CUMPLIDAS RECIENTEMENTE</div>', unsafe_allow_html=True)
+        for _, s in sanciones_ok.iterrows():
+            st.markdown(f"<small style='color:#007a30;'>✅ <b>{s['nombre']}</b> — {MOTIVO_LABELS.get(s['motivo'],s['motivo'])} (origen: vs {s['rival']} {s['fecha']}) — Cumplida</small>", unsafe_allow_html=True)
 
 # ══════════════════════════════════════════════════════════════════════════════
 # TAB 4 — FINANZAS
@@ -2533,27 +2564,23 @@ with TAB_HISTORIAL:
         st.markdown('<div class="section-header">👟 PARTICIPACIONES POR JUGADOR</div>', unsafe_allow_html=True)
         stats = q("""
             SELECT j.nombre, j.posicion,
-                   COUNT(CASE WHEN pa.rol='titular' THEN 1 END) as titulares,
-                   COUNT(CASE WHEN pa.rol='cambio' THEN 1 END) as cambios,
-                   COUNT(DISTINCT g.partido_id) as partidos_gol,
-                   COALESCE(SUM(CASE WHEN g2.jugador_id=j.id THEN 1 ELSE 0 END),0) as goles,
-                   COUNT(CASE WHEN t.tipo='amarilla' THEN 1 END) as amarillas,
-                   COUNT(CASE WHEN t.tipo='roja' THEN 1 END) as rojas
+                   (SELECT COUNT(*) FROM participaciones pa WHERE pa.jugador_id=j.id AND pa.rol='titular') as titulares,
+                   (SELECT COUNT(*) FROM participaciones pa WHERE pa.jugador_id=j.id AND pa.rol='cambio') as cambios,
+                   (SELECT COUNT(*) FROM goles g WHERE g.jugador_id=j.id AND g.tipo='normal') as goles,
+                   (SELECT COUNT(*) FROM tarjetas t WHERE t.jugador_id=j.id AND t.tipo='amarilla') as amarillas,
+                   (SELECT COUNT(*) FROM tarjetas t WHERE t.jugador_id=j.id AND t.tipo='roja') as rojas
             FROM jugadores j
-            LEFT JOIN participaciones pa ON j.id=pa.jugador_id
-            LEFT JOIN goles g ON j.id=g.jugador_id
-            LEFT JOIN goles g2 ON j.id=g2.jugador_id
-            LEFT JOIN tarjetas t ON j.id=t.jugador_id
             WHERE j.activo=1
-            GROUP BY j.id, j.nombre, j.posicion
-            ORDER BY (titulares+cambios) DESC
+            ORDER BY (
+                (SELECT COUNT(*) FROM participaciones pa WHERE pa.jugador_id=j.id)
+            ) DESC
         """)
         if len(stats) > 0:
             st.dataframe(stats.rename(columns={
                 'nombre':'Jugador','posicion':'Posición',
                 'titulares':'⚽ Titular','cambios':'🔄 Cambio',
                 'goles':'⚽ Goles','amarillas':'🟨','rojas':'🟥'
-            }).drop(columns=['partidos_gol']), use_container_width=True, hide_index=True)
+            }), use_container_width=True, hide_index=True)
 
         # ── Historial detallado ─────────────────────────────────────────────
         st.markdown('<div class="section-header">📅 HISTORIAL DETALLADO DE PARTIDOS</div>', unsafe_allow_html=True)
