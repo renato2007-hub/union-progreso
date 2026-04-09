@@ -1902,9 +1902,11 @@ if IS_ADMIN:
                         else:
                             st.markdown("<small style='color:#007a30;'>✅ Al día</small>", unsafe_allow_html=True)
                             paga_s = 0.0
-                    # Registrar multas para guardar
+                    # Leer el valor real del widget desde session_state
+                    paga_s_real = st.session_state.get(f"f3_sm_{jid_s}", paga_s)
+                    # Registrar multas para guardar con el valor real
                     for _, mrow in multas_s.iterrows():
-                        nuevas_multas[int(mrow['id'])] = (float(mrow['mp']), float(mrow['monto']), paga_s)
+                        nuevas_multas[int(mrow['id'])] = (float(mrow['mp']), float(mrow['monto']), paga_s_real)
                     st.markdown("<hr style='margin:4px 0;border-color:#eeeeee;'>", unsafe_allow_html=True)
 
             # ── Gasto / ingreso adicional ─────────────────────────────────────
@@ -1963,21 +1965,25 @@ if IS_ADMIN:
                                 restante -= pago_da
                                 cambios += 1
 
-                # Multas con pago parcial
-                # Multas — se pagan con el excedente después de la cuota
-                # nuevas_multas tiene (ya_pagado, monto_total, paga_total_jugador)
-                # El pago ya fue aplicado a la cuota arriba; aquí aplicamos lo que sobre
+                # Multas — procesar pagos de multas
                 for multa_id, (ya_pagado_m, monto_total_m, paga_total_j) in nuevas_multas.items():
                     if paga_total_j <= 0:
                         continue
-                    # Calcular cuánto se usó en la cuota del mismo jugador
-                    # Para simplificar: si paga_total_j > cuota_pendiente, el exceso va a multa
                     mr = q("SELECT jugador_id, concepto FROM multas WHERE id=?", (multa_id,)).iloc[0]
                     jid_m = int(mr['jugador_id'])
+                    # Para jugadores con cuota: el excedente sobre la cuota va a multa
+                    # Para exentos (sin cuota): todo lo que pagan va directo a multa
                     cuota_row = q("SELECT monto, COALESCE(monto_pagado,0) as mp FROM pagos WHERE partido_id=? AND jugador_id=?",
                                   (pid_f3, jid_m))
-                    cuota_pend = float(cuota_row.iloc[0]['monto']) - float(cuota_row.iloc[0]['mp']) if len(cuota_row)>0 else 0.0
-                    pago_para_multa = max(0.0, paga_total_j - cuota_pend)
+                    if len(cuota_row) > 0:
+                        cuota_original = float(cuota_row.iloc[0]['monto'])
+                        cuota_ya_pag   = float(cuota_row.iloc[0]['mp'])
+                        cuota_pend = max(0.0, cuota_original - cuota_ya_pag)
+                        pago_para_multa = max(0.0, paga_total_j - cuota_pend)
+                    else:
+                        # Exento: todo el pago es para la multa
+                        pago_para_multa = paga_total_j
+
                     debe_multa = monto_total_m - ya_pagado_m
                     pago_multa = min(pago_para_multa, debe_multa)
                     if pago_multa > 0.001:
