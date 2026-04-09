@@ -1036,8 +1036,21 @@ div[data-testid="stWidgetLabel"] p { color: #ffffff !important; font-weight: 600
 .stDataFrame th { background: var(--rojo) !important; color: white !important; }
 .stDataFrame td { color: #f0e8e8 !important; }
 
-/* Checkboxes */
-div[data-testid="stCheckbox"] label { color: #ffffff !important; }
+/* Dropdowns y listas desplegables - fondo blanco con texto oscuro */
+div[data-baseweb="popover"] { background: #ffffff !important; }
+div[data-baseweb="menu"] { background: #ffffff !important; }
+div[data-baseweb="menu"] li { color: #1a0808 !important; background: #ffffff !important; }
+div[data-baseweb="menu"] li:hover { background: #f0e0e0 !important; color: #1a0808 !important; }
+div[data-baseweb="option"] { color: #1a0808 !important; background: #ffffff !important; }
+div[data-baseweb="option"]:hover { background: #f0dede !important; }
+ul[data-testid="stSelectboxVirtualDropdown"] li { color: #1a0808 !important; }
+/* Multiselect dropdown list */
+div[role="listbox"] { background: #ffffff !important; }
+div[role="listbox"] li { color: #1a0808 !important; }
+div[role="option"] { color: #1a0808 !important; background: #ffffff !important; }
+div[role="option"]:hover { background: #f5e0e0 !important; color: #1a0808 !important; }
+/* Selected item highlight */
+div[aria-selected="true"] { background: #f0dede !important; color: #9b2335 !important; font-weight: 700 !important; }
 div[data-testid="stMultiSelect"] span { background: var(--rojo-oscuro) !important; color: #ffffff !important; }
 
 /* Info / warning / success boxes */
