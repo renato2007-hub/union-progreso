@@ -1771,20 +1771,32 @@ if IS_ADMIN:
             """, (pid_f3, pid_f3, pid_f3))
 
             if len(pagos_df) > 0:
-                st.markdown("**⚽ Cuotas de arbitraje**")
+                st.markdown("**⚽ Cobros del partido**")
+                # Totales: cuotas + multas de este partido
                 total_cuotas   = pagos_df['monto'].sum()
                 cobrado_cuotas = pagos_df['monto_pagado'].sum()
-                pend_cuotas    = total_cuotas - cobrado_cuotas
+
+                # Sumar multas de este partido
+                multas_partido = q("""SELECT COALESCE(SUM(monto),0) as t,
+                                             COALESCE(SUM(monto_pagado),0) as p
+                                      FROM multas WHERE partido_id=?""", (pid_f3,))
+                total_multas_p   = float(multas_partido.iloc[0]['t'])
+                cobrado_multas_p = float(multas_partido.iloc[0]['p'])
+
+                total_partido    = total_cuotas + total_multas_p
+                cobrado_partido  = cobrado_cuotas + cobrado_multas_p
+                pend_partido     = total_partido - cobrado_partido
+
                 cp1,cp2,cp3 = st.columns(3)
                 with cp1:
-                    st.markdown(f"""<div class="metric-card"><div class="label">💰 Total cuotas partido</div>
-                        <div class="valor" style="font-size:24px;">${total_cuotas:,.2f}</div></div>""", unsafe_allow_html=True)
+                    st.markdown(f"""<div class="metric-card"><div class="label">💰 Total a cobrar (cuotas + multas)</div>
+                        <div class="valor" style="font-size:24px;">${total_partido:,.2f}</div></div>""", unsafe_allow_html=True)
                 with cp2:
                     st.markdown(f"""<div class="metric-card"><div class="label">✅ Cobrado</div>
-                        <div class="valor" style="font-size:24px;color:#007a30;">${cobrado_cuotas:,.2f}</div></div>""", unsafe_allow_html=True)
+                        <div class="valor" style="font-size:24px;color:#007a30;">${cobrado_partido:,.2f}</div></div>""", unsafe_allow_html=True)
                 with cp3:
                     st.markdown(f"""<div class="metric-card"><div class="label">⏳ Pendiente partido</div>
-                        <div class="valor" style="font-size:24px;color:#cc0000;">${pend_cuotas:,.2f}</div></div>""", unsafe_allow_html=True)
+                        <div class="valor" style="font-size:24px;color:#cc0000;">${pend_partido:,.2f}</div></div>""", unsafe_allow_html=True)
 
                 st.markdown("<small style='color:#7a3030;'>💡 Ingresa cuánto paga cada jugador. El <b>Total</b> incluye cuota árbitro + multas + deudas anteriores.</small>", unsafe_allow_html=True)
                 nuevos_pagos_cuota = {}
