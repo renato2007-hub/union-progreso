@@ -356,24 +356,40 @@ def generar_pdf_partido(pid):
     if len(pagos) > 0:
         story.append(Paragraph("Cuotas de arbitraje:", sBold))
         story.append(sp(4))
-        p_data = [["JUGADOR", "ROL", "TOTAL", "PAGADO", "DEBE"]]
-        tot_total = tot_pagado = 0.0
+        p_data = [["JUGADOR", "ROL", "CUOTA", "PAGADO", "DEBE PARTIDO", "DEUDA ANTERIOR", "DEUDA TOTAL"]]
+        tot_cuota = tot_pagado = tot_debe_total = 0.0
         for _, row in pagos.iterrows():
-            debe = float(row['monto']) - float(row['pagado'])
-            tot_total  += float(row['monto'])
-            tot_pagado += float(row['pagado'])
-            rol_s = "Titular" if row['rol']=='titular' else \
-                    ("Cambio"  if row['rol']=='cambio'  else "—")
-            p_data.append([str(row['nombre']), rol_s,
-                            f"${float(row['monto']):,.2f}",
-                            f"${float(row['pagado']):,.2f}",
-                            f"${debe:,.2f}" if debe>0.001 else "Al dia"])
-        p_data.append(["TOTAL", "", f"${tot_total:,.2f}",
-                        f"${tot_pagado:,.2f}",
-                        f"${tot_total-tot_pagado:,.2f}"])
+            debe_partido = float(row['monto']) - float(row['pagado'])
+            jid = int(q("SELECT id FROM jugadores WHERE nombre=?", (row['nombre'],)).iloc[0]['id']) \
+                  if len(q("SELECT id FROM jugadores WHERE nombre=?", (row['nombre'],))) > 0 else 0
+            # Deuda acumulada de otros partidos
+            d_otros = q("""SELECT COALESCE(SUM(monto-COALESCE(monto_pagado,0)),0) as d
+                           FROM pagos WHERE jugador_id=? AND pagado=0 AND partido_id!=?""",
+                        (jid, pid))['d'][0] if jid else 0
+            d_multas_otros = q("""SELECT COALESCE(SUM(monto-COALESCE(monto_pagado,0)),0) as d
+                                  FROM multas WHERE jugador_id=? AND pagado=0 AND partido_id!=?""",
+                               (jid, pid))['d'][0] if jid else 0
+            deuda_anterior = float(d_otros) + float(d_multas_otros)
+            deuda_total = debe_partido + deuda_anterior
+
+            tot_cuota   += float(row['monto'])
+            tot_pagado  += float(row['pagado'])
+            tot_debe_total += deuda_total
+
+            rol_s = "Titular" if row['rol']=='titular' else ("Cambio" if row['rol']=='cambio' else "—")
+            p_data.append([
+                str(row['nombre']), rol_s,
+                f"${float(row['monto']):,.2f}",
+                f"${float(row['pagado']):,.2f}",
+                f"${debe_partido:,.2f}" if debe_partido>0.001 else "Al dia",
+                f"${deuda_anterior:,.2f}" if deuda_anterior>0.001 else "—",
+                f"${deuda_total:,.2f}" if deuda_total>0.001 else "Al dia",
+            ])
+        p_data.append(["TOTAL", "", f"${tot_cuota:,.2f}", f"${tot_pagado:,.2f}",
+                        "", "", f"${tot_debe_total:,.2f}"])
         story.append(tabla_con_total(p_data,
-            [5.5*cm, 2.5*cm, 2.8*cm, 2.8*cm, 3.4*cm],
-            align_cols={2:'RIGHT', 3:'RIGHT', 4:'RIGHT'},
+            [4*cm, 1.8*cm, 2*cm, 2*cm, 2.2*cm, 2.5*cm, 2.5*cm],
+            align_cols={2:'RIGHT', 3:'RIGHT', 4:'RIGHT', 5:'RIGHT', 6:'RIGHT'},
             header_color=C_COBRO,
             total_color=colors.HexColor("#fde8d8")))
 
@@ -1641,7 +1657,7 @@ if IS_ADMIN:
     # ════════════════════════════════════════════════════════════════════
     # FASE 3 — COBROS (mismo día o después)
     # ════════════════════════════════════════════════════════════════════
-    fase_header(3, "COBROS", "Registra cuánto pagó cada uno — los valores pendientes se acumulan como deuda", "#1a5c2a")
+    fase_header(3, "COBROS", "Registra cuánto pagó cada uno — los pendientes se acumulan partido a partido", "#1a5c2a")
 
     partidos_list = get_partidos()
     if len(partidos_list) == 0:
@@ -1669,34 +1685,52 @@ if IS_ADMIN:
             pend_cuotas    = total_cuotas - cobrado_cuotas
             cp1,cp2,cp3 = st.columns(3)
             with cp1:
-                st.markdown(f"""<div class="metric-card"><div class="label">💰 Total cuotas</div>
+                st.markdown(f"""<div class="metric-card"><div class="label">💰 Total cuotas partido</div>
                     <div class="valor" style="font-size:24px;">${total_cuotas:,.2f}</div></div>""", unsafe_allow_html=True)
             with cp2:
                 st.markdown(f"""<div class="metric-card"><div class="label">✅ Cobrado</div>
                     <div class="valor" style="font-size:24px;color:#f0c040;">${cobrado_cuotas:,.2f}</div></div>""", unsafe_allow_html=True)
             with cp3:
-                st.markdown(f"""<div class="metric-card"><div class="label">⏳ Pendiente</div>
+                st.markdown(f"""<div class="metric-card"><div class="label">⏳ Pendiente partido</div>
                     <div class="valor" style="font-size:24px;color:#ff6b6b;">${pend_cuotas:,.2f}</div></div>""", unsafe_allow_html=True)
 
-            st.markdown("<small style='color:#d4b8b8;'>Ingresa cuánto pagó cada jugador. Si paga menos del total, la diferencia queda como deuda acumulada.</small>", unsafe_allow_html=True)
+            st.markdown("<small style='color:#d4b8b8;'>💡 La columna <b>Deuda total</b> incluye este partido + partidos anteriores sin pagar. Ingresa cuánto paga ahora.</small>", unsafe_allow_html=True)
             nuevos_pagos_cuota = {}
             for _, row in pagos_df.iterrows():
-                deuda_previa = float(row['monto']) - float(row['monto_pagado'])
-                if bool(row['pagado']): continue  # ya saldado
+                deuda_partido = float(row['monto']) - float(row['monto_pagado'])
+                if bool(row['pagado']): continue
+                jid = int(row['jugador_id'])
+                # Deuda acumulada de OTROS partidos (no este)
+                deuda_otros = q("""
+                    SELECT COALESCE(SUM(monto - COALESCE(monto_pagado,0)),0) as d
+                    FROM pagos WHERE jugador_id=? AND pagado=0 AND partido_id!=?
+                """, (jid, pid_f3))['d'][0]
+                deuda_otros_multas = q("""
+                    SELECT COALESCE(SUM(monto - COALESCE(monto_pagado,0)),0) as d
+                    FROM multas WHERE jugador_id=? AND pagado=0 AND partido_id!=?
+                """, (jid, pid_f3))['d'][0]
+                deuda_acum_anterior = float(deuda_otros) + float(deuda_otros_multas)
+                deuda_total = deuda_partido + deuda_acum_anterior
+
                 rol_str = "⚽ Titular" if row['rol']=='titular' else ("🔄 Cambio" if row['rol']=='cambio' else "")
-                col_nom, col_debe, col_paga = st.columns([3, 2, 2])
+                col_nom, col_part, col_acum, col_total, col_paga = st.columns([3, 1.5, 1.5, 1.5, 1.5])
                 with col_nom:
                     st.markdown(f"**{row['nombre']}** <small style='color:#d4b8b8;'>{rol_str}</small>", unsafe_allow_html=True)
-                with col_debe:
-                    st.markdown(f"Debe: <span style='color:#ff6b6b;font-weight:700;'>${deuda_previa:,.2f}</span>", unsafe_allow_html=True)
+                with col_part:
+                    st.markdown(f"<small style='color:#d4b8b8;'>Este partido</small><br><span style='color:#ff6b6b;font-weight:700;'>${deuda_partido:,.2f}</span>", unsafe_allow_html=True)
+                with col_acum:
+                    color_ant = "#ffaa55" if deuda_acum_anterior > 0 else "#50e080"
+                    st.markdown(f"<small style='color:#d4b8b8;'>Anterior</small><br><span style='color:{color_ant};font-weight:700;'>${deuda_acum_anterior:,.2f}</span>", unsafe_allow_html=True)
+                with col_total:
+                    st.markdown(f"<small style='color:#d4b8b8;'>Total debe</small><br><span style='color:#ff6b6b;font-weight:800;'>${deuda_total:,.2f}</span>", unsafe_allow_html=True)
                 with col_paga:
-                    paga_ahora = st.number_input("Paga ahora $", min_value=0.0,
-                        max_value=float(deuda_previa), value=0.0, step=0.5,
+                    paga_ahora = st.number_input("Paga $", min_value=0.0,
+                        max_value=float(deuda_partido), value=0.0, step=0.5,
                         key=f"f3_cuota_{row['id']}", label_visibility="visible")
                 nuevos_pagos_cuota[int(row['id'])] = (float(row['monto_pagado']), float(row['monto']), paga_ahora)
 
         # ── Multas por tarjetas ──────────────────────────────────────────
-        multas_df = q("""SELECT m.id, j.nombre, m.concepto, m.monto,
+        multas_df = q("""SELECT m.id, j.nombre, j.id as jugador_id, m.concepto, m.monto,
                                COALESCE(m.monto_pagado,0) as monto_pagado, m.pagado
                          FROM multas m JOIN jugadores j ON m.jugador_id=j.id
                          WHERE m.partido_id=? AND m.pagado=0 ORDER BY j.nombre""", (pid_f3,))
