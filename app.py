@@ -666,8 +666,8 @@ USUARIOS = {
 def login_screen():
     st.markdown("""
     <div style="max-width:380px;margin:60px auto 0 auto;text-align:center;">
-      <div style="font-family:'Bebas Neue',sans-serif;font-size:52px;color:#f0c040;letter-spacing:4px;">⚽</div>
-      <div style="font-family:'Bebas Neue',sans-serif;font-size:32px;color:#f0c040;letter-spacing:3px;">UNIÓN Y PROGRESO</div>
+      <div style="font-family:'Bebas Neue',sans-serif;font-size:52px;color:#b87800;letter-spacing:4px;">⚽</div>
+      <div style="font-family:'Bebas Neue',sans-serif;font-size:32px;color:#b87800;letter-spacing:3px;">UNIÓN Y PROGRESO</div>
       <div style="color:#7a3030;font-size:12px;letter-spacing:2px;margin-bottom:32px;">BARRIO LA LIBERTAD</div>
     </div>""", unsafe_allow_html=True)
     with st.form("login_form"):
@@ -983,7 +983,7 @@ label { color: #1a0808 !important; font-weight: 600 !important; }
 # ─── HEADER ────────────────────────────────────────────────────────────────────
 st.markdown("""
 <div style="text-align:center; padding: 10px 0 20px 0;">
-  <span style="font-family:'Bebas Neue',sans-serif; font-size:48px; color:#f0c040; letter-spacing:4px;">⚽ UNIÓN Y PROGRESO</span><br>
+  <span style="font-family:'Bebas Neue',sans-serif; font-size:48px; color:#b87800; letter-spacing:4px;">⚽ UNIÓN Y PROGRESO</span><br>
   <span style="color:#7a3030; font-size:13px; letter-spacing:2px;">BARRIO LA LIBERTAD · CONTROL FINANCIERO · ALINEACIONES · DISCIPLINA</span>
 </div>
 """, unsafe_allow_html=True)
@@ -1581,19 +1581,31 @@ if IS_ADMIN:
 
                 # Borrar cambios anteriores y reinsertar desde Fase 2
                 c.execute("DELETE FROM cambios WHERE partido_id=?", (pid_f2,))
+                # Obtener cuota del partido para calcular cobro del suplente
+                p_cuota = q("""SELECT DISTINCT pg.monto FROM pagos pg
+                               WHERE pg.partido_id=? LIMIT 1""", (pid_f2,))
+                monto_cuota = float(p_cuota.iloc[0]['monto']) if len(p_cuota) > 0 else 0.0
+
                 for sale_n, entra_n, min_c in cambios_data_f2:
                     jrow_sale  = jugadores[jugadores['nombre']==sale_n]
                     jrow_entra = jugadores[jugadores['nombre']==entra_n]
                     if len(jrow_sale)>0 and len(jrow_entra)>0:
-                        existe = q("SELECT id FROM participaciones WHERE partido_id=? AND jugador_id=?",
-                                   (pid_f2, int(jrow_entra.iloc[0]['id'])))
-                        if len(existe)==0:
+                        jid_entra = int(jrow_entra.iloc[0]['id'])
+                        existe_partic = q("SELECT id FROM participaciones WHERE partido_id=? AND jugador_id=?",
+                                   (pid_f2, jid_entra))
+                        if len(existe_partic)==0:
                             c.execute("INSERT INTO participaciones (partido_id,jugador_id,rol) VALUES (?,?,?)",
-                                      (pid_f2, int(jrow_entra.iloc[0]['id']), 'cambio'))
+                                      (pid_f2, jid_entra, 'cambio'))
+                        # Crear cobro de cuota para el suplente si no tiene uno y no es exento
+                        existe_pago = q("SELECT id FROM pagos WHERE partido_id=? AND jugador_id=?",
+                                        (pid_f2, jid_entra))
+                        exento = bool(jrow_entra.iloc[0]['exento_arbitraje'])
+                        if len(existe_pago)==0 and not exento and monto_cuota > 0:
+                            c.execute("INSERT INTO pagos (partido_id,jugador_id,monto,pagado) VALUES (?,?,?,0)",
+                                      (pid_f2, jid_entra, monto_cuota))
                         c.execute("""INSERT INTO cambios (partido_id,jugador_sale_id,jugador_entra_id,minuto)
                                      VALUES (?,?,?,?)""",
-                                  (pid_f2, int(jrow_sale.iloc[0]['id']),
-                                   int(jrow_entra.iloc[0]['id']), min_c))
+                                  (pid_f2, int(jrow_sale.iloc[0]['id']), jid_entra, min_c))
 
                 # Borrar goles anteriores y reinsertar
                 c.execute("DELETE FROM goles WHERE partido_id=?", (pid_f2,))
@@ -1763,20 +1775,20 @@ if IS_ADMIN:
                     # Mostrar TODOS los jugadores — los saldados en verde, los pendientes normales
                     col_nom, col_part, col_acum, col_total, col_paga = st.columns([3, 1.5, 1.5, 1.5, 1.5])
                     with col_nom:
-                        color_nom = "#50e080" if ya_saldado and deuda_total < 0.001 else "#ffffff"
+                        color_nom = "#007a30" if ya_saldado and deuda_total < 0.001 else "#1a0808"
                         estado_icon = " ✅" if ya_saldado and deuda_total < 0.001 else ""
                         st.markdown(f"<span style='color:{color_nom};font-weight:700;'>{row['nombre']}{estado_icon}</span> "
                                     f"<small style='color:#7a3030;'>{rol_str}</small>", unsafe_allow_html=True)
                     with col_part:
-                        color_p = "#50e080" if deuda_partido < 0.001 else "#ff6b6b"
+                        color_p = "#007a30" if deuda_partido < 0.001 else "#cc0000"
                         st.markdown(f"<small style='color:#7a3030;'>Este partido</small><br>"
                                     f"<span style='color:{color_p};font-weight:700;'>${deuda_partido:,.2f}</span>", unsafe_allow_html=True)
                     with col_acum:
-                        color_ant = "#ffaa55" if deuda_anterior > 0 else "#50e080"
+                        color_ant = "#b85000" if deuda_anterior > 0 else "#007a30"
                         st.markdown(f"<small style='color:#7a3030;'>Anterior</small><br>"
                                     f"<span style='color:{color_ant};font-weight:700;'>${deuda_anterior:,.2f}</span>", unsafe_allow_html=True)
                     with col_total:
-                        color_tot = "#50e080" if deuda_total < 0.001 else "#ff6b6b"
+                        color_tot = "#007a30" if deuda_total < 0.001 else "#cc0000"
                         st.markdown(f"<small style='color:#7a3030;'>Total debe</small><br>"
                                     f"<span style='color:{color_tot};font-weight:800;'>${deuda_total:,.2f}</span>", unsafe_allow_html=True)
                     with col_paga:
@@ -2287,12 +2299,12 @@ with TAB_HISTORIAL:
             for rank, (_, row) in enumerate(goleadores_df.iterrows(), 1):
                 medal = "🥇" if rank==1 else ("🥈" if rank==2 else ("🥉" if rank==3 else f"#{rank}"))
                 st.markdown(f"""<div class="jugador-card">
-                    <div class="jugador-num" style="background:#3d2000;color:#f0c040;font-size:18px;">{medal}</div>
+                    <div class="jugador-num" style="background:#3d2000;color:#b87800;font-size:18px;">{medal}</div>
                     <div style="flex:1;">
                         <div style="font-weight:800;font-size:16px;">{row['nombre']}</div>
                         <div style="color:#7a3030;font-size:12px;">{row['posicion'] or '—'}</div>
                     </div>
-                    <div style="font-family:'Bebas Neue',sans-serif;font-size:36px;color:#f0c040;">{int(row['goles'])} ⚽</div>
+                    <div style="font-family:'Bebas Neue',sans-serif;font-size:36px;color:#b87800;">{int(row['goles'])} ⚽</div>
                 </div>""", unsafe_allow_html=True)
         else:
             st.info("Aún no hay goles registrados.")
