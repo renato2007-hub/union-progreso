@@ -1308,41 +1308,30 @@ if IS_ADMIN:
     }
 
     st.markdown("**⚽ Titulares**")
-    f1_titulares = st.multiselect("Selecciona titulares (hasta 11)", nombres, key="f1_tit",
+    # Advertencia si supera 11
+    if len(f1_titulares) > 11:
+        st.error(f"⚠️ Tienes {len(f1_titulares)} titulares. El máximo es 11. Quita {len(f1_titulares)-11} jugador(es).")
+    elif len(f1_titulares) == 11:
+        st.success("✅ 11 titulares — alineación completa.")
+    elif len(f1_titulares) > 0:
+        st.caption(f"{len(f1_titulares)}/11 titulares seleccionados.")
+
+    f1_titulares = st.multiselect("Selecciona titulares (máximo 11)", nombres, key="f1_tit",
                                    default=draft.get('titulares', []))
     st.session_state['f1_draft']['titulares'] = f1_titulares
 
-    # ── Cambios con jugador que sale y entra ──────────────────────────────
-    st.markdown("**🔄 Cambios** *(quién sale, quién entra y a qué minuto)*")
-    n_cambios = st.number_input("¿Cuántos cambios hubo?", min_value=0, max_value=5,
-                                 value=0, step=1, key="f1_ncambios")
-    cambios_data = []  # lista de (sale, entra, minuto)
-    nombres_disponibles_salida = f1_titulares if f1_titulares else nombres
-    nombres_ya_entran = []
-    for i in range(int(n_cambios)):
-        st.markdown(f"<small style='color:#d4b8b8;'>Cambio #{i+1}</small>", unsafe_allow_html=True)
-        cc1, cc2, cc3 = st.columns([3, 3, 1])
-        with cc1:
-            sale = st.selectbox("Sale ↗️", nombres_disponibles_salida,
-                                key=f"f1_sale_{i}")
-        with cc2:
-            entra_opts = [n for n in nombres if n not in f1_titulares and n not in nombres_ya_entran]
-            entra = st.selectbox("Entra ↘️", entra_opts if entra_opts else nombres,
-                                 key=f"f1_entra_{i}")
-        with cc3:
-            min_c = st.number_input("Min.", min_value=1, max_value=120,
-                                    value=45, key=f"f1_minc_{i}")
-        cambios_data.append((sale, entra, min_c))
-        nombres_ya_entran.append(entra)
-
-    # Los jugadores que entran al cambio se extraen de cambios_data
-    f1_entraron = [entra for _, entra, _ in cambios_data] if cambios_data else []
+    # Los cambios se registran en Fase 2, no aquí
+    st.info("💡 Los cambios (quién sale y quién entra) se registran en la **Fase 2** después de guardar la alineación.")
+    f1_entraron = []
+    cambios_data = []
 
     if st.button("💾 GUARDAR ALINEACIÓN", type="primary", key="btn_fase1"):
         if not f1_rival.strip():
             st.error("⚠️ Ingresa el nombre del rival.")
         elif len(f1_titulares) == 0:
             st.error("⚠️ Selecciona al menos un titular.")
+        elif len(f1_titulares) > 11:
+            st.error(f"⚠️ Máximo 11 titulares. Tienes {len(f1_titulares)}, quita {len(f1_titulares)-11}.")
         else:
             # ── Validar partido duplicado (misma fecha + mismo rival) ───
             duplicado = q("""SELECT id FROM partidos
@@ -1403,16 +1392,61 @@ if IS_ADMIN:
         st.info("Primero guarda una alineación en la Fase 1.")
     else:
         opciones_f2 = [f"{r['fecha']} vs {r['rival']}" for _, r in partidos_list.iterrows()]
-        sel_f2 = st.selectbox("Selecciona el partido", opciones_f2, key="sel_f2")
+        # Por defecto muestra el partido más reciente (índice 0 = más reciente)
+        sel_f2 = st.selectbox("Selecciona el partido", opciones_f2, key="sel_f2", index=0)
         pid_f2 = int(partidos_list.iloc[opciones_f2.index(sel_f2)]['id'])
         p_data = partidos_list[partidos_list['id']==pid_f2].iloc[0]
 
-        # Participantes de este partido para los selectores
+        # Participantes titulares de este partido
         partic_f2 = q("""SELECT j.nombre, pa.rol FROM participaciones pa
                          JOIN jugadores j ON pa.jugador_id=j.id
                          WHERE pa.partido_id=?""", (pid_f2,))
         nombres_f2 = partic_f2['nombre'].tolist() if len(partic_f2)>0 else nombres
+        titulares_f2 = partic_f2[partic_f2['rol']=='titular']['nombre'].tolist() if len(partic_f2)>0 else []
 
+        # ── Cambios del partido ──────────────────────────────────────────
+        st.markdown("**🔄 Cambios del partido** *(quién sale, quién entra y a qué minuto)*")
+
+        # Cargar cambios ya guardados
+        cambios_guardados = q("""SELECT js.nombre as sale, je.nombre as entra, c.minuto
+                                 FROM cambios c
+                                 JOIN jugadores js ON c.jugador_sale_id=js.id
+                                 JOIN jugadores je ON c.jugador_entra_id=je.id
+                                 WHERE c.partido_id=? ORDER BY c.minuto""", (pid_f2,))
+        n_cambios_guardados = len(cambios_guardados)
+
+        n_cambios_f2 = st.number_input("¿Cuántos cambios hubo?", min_value=0, max_value=5,
+                                        value=n_cambios_guardados, step=1, key="f2_ncambios")
+        cambios_data_f2 = []
+        nombres_ya_entran_f2 = []
+        # Nombres disponibles para salir = titulares del partido
+        disp_sale = titulares_f2 if titulares_f2 else nombres
+        # Nombres disponibles para entrar = NO titulares
+        disp_entra_base = [n for n in nombres if n not in titulares_f2]
+
+        for i in range(int(n_cambios_f2)):
+            st.markdown(f"<small style='color:#d4b8b8;'>Cambio #{i+1}</small>", unsafe_allow_html=True)
+            # Valores por defecto desde cambios ya guardados
+            default_sale  = str(cambios_guardados.iloc[i]['sale'])  if i < n_cambios_guardados else (disp_sale[0] if disp_sale else nombres[0])
+            default_entra = str(cambios_guardados.iloc[i]['entra']) if i < n_cambios_guardados else None
+            default_min   = int(cambios_guardados.iloc[i]['minuto']) if i < n_cambios_guardados and cambios_guardados.iloc[i]['minuto'] else 45
+
+            cc1, cc2, cc3 = st.columns([3, 3, 1])
+            with cc1:
+                idx_sale = disp_sale.index(default_sale) if default_sale in disp_sale else 0
+                sale_f2 = st.selectbox("Sale ↗️", disp_sale, index=idx_sale, key=f"f2_sale_{i}")
+            with cc2:
+                disp_entra = [n for n in disp_entra_base if n not in nombres_ya_entran_f2]
+                if not disp_entra: disp_entra = nombres
+                idx_entra = disp_entra.index(default_entra) if default_entra and default_entra in disp_entra else 0
+                entra_f2 = st.selectbox("Entra ↘️", disp_entra, index=idx_entra, key=f"f2_entra_{i}")
+            with cc3:
+                min_f2 = st.number_input("Min.", min_value=1, max_value=120,
+                                          value=default_min, key=f"f2_minc_{i}")
+            cambios_data_f2.append((sale_f2, entra_f2, min_f2))
+            nombres_ya_entran_f2.append(entra_f2)
+
+        # Resultado
         f2c1, f2c2 = st.columns(2)
         with f2c1:
             f2_gf = st.number_input("Goles a favor ⚽", min_value=0, step=1,
@@ -1561,6 +1595,22 @@ if IS_ADMIN:
             c.execute("UPDATE partidos SET goles_favor=?,goles_contra=?,notas=?,informe_arbitral=? WHERE id=?",
                       (f2_gf, f2_gc, f2_notas, f2_arbitral, pid_f2))
 
+            # Borrar cambios anteriores y reinsertar desde Fase 2
+            c.execute("DELETE FROM cambios WHERE partido_id=?", (pid_f2,))
+            for sale_n, entra_n, min_c in cambios_data_f2:
+                jrow_sale  = jugadores[jugadores['nombre']==sale_n]
+                jrow_entra = jugadores[jugadores['nombre']==entra_n]
+                if len(jrow_sale)>0 and len(jrow_entra)>0:
+                    existe = q("SELECT id FROM participaciones WHERE partido_id=? AND jugador_id=?",
+                               (pid_f2, int(jrow_entra.iloc[0]['id'])))
+                    if len(existe)==0:
+                        c.execute("INSERT INTO participaciones (partido_id,jugador_id,rol) VALUES (?,?,?)",
+                                  (pid_f2, int(jrow_entra.iloc[0]['id']), 'cambio'))
+                    c.execute("""INSERT INTO cambios (partido_id,jugador_sale_id,jugador_entra_id,minuto)
+                                 VALUES (?,?,?,?)""",
+                              (pid_f2, int(jrow_sale.iloc[0]['id']),
+                               int(jrow_entra.iloc[0]['id']), min_c))
+
             # Borrar goles anteriores y reinsertar
             c.execute("DELETE FROM goles WHERE partido_id=?", (pid_f2,))
             if f2_gf > 0:
@@ -1664,7 +1714,7 @@ if IS_ADMIN:
         st.info("Aún no hay partidos registrados.")
     else:
         opciones_f3 = [f"{r['fecha']} vs {r['rival']}" for _, r in partidos_list.iterrows()]
-        sel_f3 = st.selectbox("Selecciona el partido", opciones_f3, key="sel_f3")
+        sel_f3 = st.selectbox("Selecciona el partido", opciones_f3, key="sel_f3", index=0)
         pid_f3 = int(partidos_list.iloc[opciones_f3.index(sel_f3)]['id'])
 
         # ── Cuotas de arbitraje ──────────────────────────────────────────
