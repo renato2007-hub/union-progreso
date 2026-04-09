@@ -1741,8 +1741,8 @@ if IS_ADMIN:
                     conn_fix.commit(); conn_fix.close()
                     st.rerun()
 
-            # ── Lista completa: jugadores con cuota O con multa ───────────
-            # Incluye exentos de arbitraje si tienen multa por tarjeta
+            # ── Lista completa de jugadores a cobrar ──────────────────────
+            # Incluye: todos con cuota + todos con multa pendiente (aunque sean exentos)
             pagos_df = q("""
                 SELECT pg.id, j.nombre, j.id as jugador_id,
                        pg.monto, COALESCE(pg.monto_pagado,0) as monto_pagado, pg.pagado,
@@ -1752,11 +1752,12 @@ if IS_ADMIN:
                 LEFT JOIN participaciones pa
                     ON pa.jugador_id=pg.jugador_id AND pa.partido_id=pg.partido_id
                 WHERE pg.partido_id=?
+                ORDER BY pa.rol DESC, j.nombre
+            """, (pid_f3,))
 
-                UNION
-
-                SELECT -m.jugador_id as id, j.nombre, j.id as jugador_id,
-                       0 as monto, 0 as monto_pagado, 1 as pagado,
+            # Jugadores con multa pendiente que NO tienen registro en pagos (exentos de arbitraje)
+            solo_multas_df = q("""
+                SELECT DISTINCT j.id as jugador_id, j.nombre,
                        COALESCE(pa.rol,'N/D') as rol
                 FROM multas m
                 JOIN jugadores j ON j.id=m.jugador_id
@@ -1766,9 +1767,8 @@ if IS_ADMIN:
                   AND m.jugador_id NOT IN (
                       SELECT jugador_id FROM pagos WHERE partido_id=?
                   )
-
-                ORDER BY rol DESC, nombre
-            """, (pid_f3, pid_f3, pid_f3))
+                ORDER BY j.nombre
+            """, (pid_f3, pid_f3))
 
             if len(pagos_df) > 0:
                 st.markdown("**⚽ Cobros del partido**")
@@ -1864,6 +1864,47 @@ if IS_ADMIN:
                     for _, mrow in multas_jug.iterrows():
                         nuevas_multas[int(mrow['id'])] = (float(mrow['mp']), float(mrow['monto']), paga_ahora)
 
+                    st.markdown("<hr style='margin:4px 0;border-color:#eeeeee;'>", unsafe_allow_html=True)
+
+                # ── Jugadores exentos de arbitraje pero con multas pendientes ──
+                for _, srow in solo_multas_df.iterrows():
+                    jid_s = int(srow['jugador_id'])
+                    multas_s = q("""SELECT id, concepto, monto, COALESCE(monto_pagado,0) as mp
+                                    FROM multas WHERE jugador_id=? AND pagado=0 AND partido_id=?
+                                 """, (jid_s, pid_f3))
+                    multa_tot_s = float(multas_s['monto'].sum() - multas_s['mp'].sum()) if len(multas_s)>0 else 0.0
+                    deuda_ant_s = float(q("""SELECT COALESCE(SUM(monto-COALESCE(monto_pagado,0)),0) as d
+                        FROM pagos WHERE jugador_id=? AND pagado=0""", (jid_s,))['d'][0]) + \
+                                  float(q("""SELECT COALESCE(SUM(monto-COALESCE(monto_pagado,0)),0) as d
+                        FROM multas WHERE jugador_id=? AND pagado=0 AND partido_id!=?""", (jid_s, pid_f3))['d'][0])
+                    deuda_tot_s = multa_tot_s + deuda_ant_s
+                    rol_s = "Titular" if srow['rol']=='titular' else ("Cambio" if srow['rol']=='cambio' else "")
+                    color_tot_s = "#007a30" if deuda_tot_s < 0.001 else "#cc0000"
+
+                    rc1, rc2, rc3, rc4, rc5, rc6 = st.columns([2.5, 1.2, 1.2, 1.2, 1.2, 1.5])
+                    with rc1:
+                        st.markdown(f"<span style='font-weight:700;color:#1a0808;'>{srow['nombre']}</span><br>"
+                                    f"<small style='color:#7a3030;'>{rol_s} · Exento árb.</small>", unsafe_allow_html=True)
+                    with rc2:
+                        st.markdown(f"<span style='color:#007a30;font-weight:700;'>$0.00</span>", unsafe_allow_html=True)
+                    with rc3:
+                        c = "#007a30" if multa_tot_s < 0.001 else "#b85000"
+                        st.markdown(f"<span style='color:{c};font-weight:700;'>${multa_tot_s:,.2f}</span>", unsafe_allow_html=True)
+                    with rc4:
+                        c = "#007a30" if deuda_ant_s < 0.001 else "#b85000"
+                        st.markdown(f"<span style='color:{c};font-weight:700;'>${deuda_ant_s:,.2f}</span>", unsafe_allow_html=True)
+                    with rc5:
+                        st.markdown(f"<span style='color:{color_tot_s};font-weight:800;'>${deuda_tot_s:,.2f}</span>", unsafe_allow_html=True)
+                    with rc6:
+                        if deuda_tot_s > 0.001:
+                            paga_s = st.number_input("$", min_value=0.0, max_value=float(deuda_tot_s),
+                                value=0.0, step=0.5, key=f"f3_sm_{jid_s}", label_visibility="collapsed")
+                        else:
+                            st.markdown("<small style='color:#007a30;'>✅ Al día</small>", unsafe_allow_html=True)
+                            paga_s = 0.0
+                    # Registrar multas para guardar
+                    for _, mrow in multas_s.iterrows():
+                        nuevas_multas[int(mrow['id'])] = (float(mrow['mp']), float(mrow['monto']), paga_s)
                     st.markdown("<hr style='margin:4px 0;border-color:#eeeeee;'>", unsafe_allow_html=True)
 
             # ── Gasto / ingreso adicional ─────────────────────────────────────
