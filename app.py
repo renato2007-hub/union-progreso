@@ -668,7 +668,7 @@ def login_screen():
     <div style="max-width:380px;margin:60px auto 0 auto;text-align:center;">
       <div style="font-family:'Bebas Neue',sans-serif;font-size:52px;color:#f0c040;letter-spacing:4px;">⚽</div>
       <div style="font-family:'Bebas Neue',sans-serif;font-size:32px;color:#f0c040;letter-spacing:3px;">UNIÓN Y PROGRESO</div>
-      <div style="color:#d4b8b8;font-size:12px;letter-spacing:2px;margin-bottom:32px;">BARRIO LA LIBERTAD</div>
+      <div style="color:#7a3030;font-size:12px;letter-spacing:2px;margin-bottom:32px;">BARRIO LA LIBERTAD</div>
     </div>""", unsafe_allow_html=True)
     with st.form("login_form"):
         usuario  = st.text_input("👤 Usuario", placeholder="Ingresa tu usuario")
@@ -984,7 +984,7 @@ label { color: #1a0808 !important; font-weight: 600 !important; }
 st.markdown("""
 <div style="text-align:center; padding: 10px 0 20px 0;">
   <span style="font-family:'Bebas Neue',sans-serif; font-size:48px; color:#f0c040; letter-spacing:4px;">⚽ UNIÓN Y PROGRESO</span><br>
-  <span style="color:#d4b8b8; font-size:13px; letter-spacing:2px;">BARRIO LA LIBERTAD · CONTROL FINANCIERO · ALINEACIONES · DISCIPLINA</span>
+  <span style="color:#7a3030; font-size:13px; letter-spacing:2px;">BARRIO LA LIBERTAD · CONTROL FINANCIERO · ALINEACIONES · DISCIPLINA</span>
 </div>
 """, unsafe_allow_html=True)
 
@@ -1121,8 +1121,8 @@ if IS_ADMIN:
         <div class="jugador-card">
             <div class="jugador-num">{num_display}</div>
             <div style="flex:1;">
-                <div class="jugador-nombre" style="font-weight:800; font-size:16px; color:#ffffff;">{j['nombre']}</div>
-                <div class="jugador-pos" style="color:#d4b0b0; font-size:12px; margin-bottom:4px;">{j['posicion'] or 'Sin posición'}</div>
+                <div style="font-weight:800; font-size:16px; color:#1a0808;">{j['nombre']}</div>
+                <div style="color:#7a3030; font-size:12px; margin-bottom:4px;">{j['posicion'] or 'Sin posición'}</div>
                 <div>{badges}</div>
             </div>
         </div>
@@ -1401,7 +1401,7 @@ if IS_ADMIN:
             disp_entra_base = [n for n in nombres if n not in titulares_f2]
 
             for i in range(int(n_cambios_f2)):
-                st.markdown(f"<small style='color:#d4b8b8;'>Cambio #{i+1}</small>", unsafe_allow_html=True)
+                st.markdown(f"<small style='color:#7a3030;'>Cambio #{i+1}</small>", unsafe_allow_html=True)
                 # Valores por defecto desde cambios ya guardados
                 default_sale  = str(cambios_guardados.iloc[i]['sale'])  if i < n_cambios_guardados else (disp_sale[0] if disp_sale else nombres[0])
                 default_entra = str(cambios_guardados.iloc[i]['entra']) if i < n_cambios_guardados else None
@@ -1490,7 +1490,7 @@ if IS_ADMIN:
             # Mostrar tarjetas actuales
             tarjetas_actuales = st.session_state[key_tarj]
             if tarjetas_actuales:
-                st.markdown("<small style='color:#d4b8b8;'>Tarjetas registradas:</small>", unsafe_allow_html=True)
+                st.markdown("<small style='color:#7a3030;'>Tarjetas registradas:</small>", unsafe_allow_html=True)
                 to_remove = []
                 for i, t in enumerate(tarjetas_actuales):
                     tc1, tc2, tc3, tc4 = st.columns([3, 2, 1, 1])
@@ -1520,7 +1520,7 @@ if IS_ADMIN:
                                     unsafe_allow_html=True)
 
             # Agregar nueva tarjeta
-            st.markdown("<small style='color:#d4b8b8;'>Agregar tarjeta:</small>", unsafe_allow_html=True)
+            st.markdown("<small style='color:#7a3030;'>Agregar tarjeta:</small>", unsafe_allow_html=True)
             na1, na2, na3, na4 = st.columns([3, 2, 1, 1])
             with na1:
                 nueva_tarj_jug = st.selectbox("Jugador", nombres_f2, key=f"ntj_{pid_f2}")
@@ -1726,12 +1726,12 @@ if IS_ADMIN:
                         <div class="valor" style="font-size:24px;">${total_cuotas:,.2f}</div></div>""", unsafe_allow_html=True)
                 with cp2:
                     st.markdown(f"""<div class="metric-card"><div class="label">✅ Cobrado</div>
-                        <div class="valor" style="font-size:24px;color:#50e080;">${cobrado_cuotas:,.2f}</div></div>""", unsafe_allow_html=True)
+                        <div class="valor" style="font-size:24px;color:#007a30;">${cobrado_cuotas:,.2f}</div></div>""", unsafe_allow_html=True)
                 with cp3:
                     st.markdown(f"""<div class="metric-card"><div class="label">⏳ Pendiente partido</div>
-                        <div class="valor" style="font-size:24px;color:#ff6b6b;">${pend_cuotas:,.2f}</div></div>""", unsafe_allow_html=True)
+                        <div class="valor" style="font-size:24px;color:#cc0000;">${pend_cuotas:,.2f}</div></div>""", unsafe_allow_html=True)
 
-                st.markdown("<small style='color:#d4b8b8;'>💡 <b style='color:#ffffff;'>Deuda total</b> = cuota árbitro + multas de este partido + deudas anteriores sin pagar.</small>", unsafe_allow_html=True)
+                st.markdown("<small style='color:#7a3030;'>💡 <b style='color:#1a0808;'>Deuda total</b> = cuota árbitro + multas de este partido + deudas anteriores sin pagar.</small>", unsafe_allow_html=True)
                 nuevos_pagos_cuota = {}
 
                 for _, row in pagos_df.iterrows():
@@ -1766,18 +1766,18 @@ if IS_ADMIN:
                         color_nom = "#50e080" if ya_saldado and deuda_total < 0.001 else "#ffffff"
                         estado_icon = " ✅" if ya_saldado and deuda_total < 0.001 else ""
                         st.markdown(f"<span style='color:{color_nom};font-weight:700;'>{row['nombre']}{estado_icon}</span> "
-                                    f"<small style='color:#d4b8b8;'>{rol_str}</small>", unsafe_allow_html=True)
+                                    f"<small style='color:#7a3030;'>{rol_str}</small>", unsafe_allow_html=True)
                     with col_part:
                         color_p = "#50e080" if deuda_partido < 0.001 else "#ff6b6b"
-                        st.markdown(f"<small style='color:#d4b8b8;'>Este partido</small><br>"
+                        st.markdown(f"<small style='color:#7a3030;'>Este partido</small><br>"
                                     f"<span style='color:{color_p};font-weight:700;'>${deuda_partido:,.2f}</span>", unsafe_allow_html=True)
                     with col_acum:
                         color_ant = "#ffaa55" if deuda_anterior > 0 else "#50e080"
-                        st.markdown(f"<small style='color:#d4b8b8;'>Anterior</small><br>"
+                        st.markdown(f"<small style='color:#7a3030;'>Anterior</small><br>"
                                     f"<span style='color:{color_ant};font-weight:700;'>${deuda_anterior:,.2f}</span>", unsafe_allow_html=True)
                     with col_total:
                         color_tot = "#50e080" if deuda_total < 0.001 else "#ff6b6b"
-                        st.markdown(f"<small style='color:#d4b8b8;'>Total debe</small><br>"
+                        st.markdown(f"<small style='color:#7a3030;'>Total debe</small><br>"
                                     f"<span style='color:{color_tot};font-weight:800;'>${deuda_total:,.2f}</span>", unsafe_allow_html=True)
                     with col_paga:
                         if deuda_total > 0.001:
@@ -1786,7 +1786,7 @@ if IS_ADMIN:
                                 help=f"Puede pagar hasta ${deuda_total:,.2f}",
                                 key=f"f3_cuota_{row['id']}", label_visibility="visible")
                         else:
-                            st.markdown("<small style='color:#50e080;'>✅ Al día</small>", unsafe_allow_html=True)
+                            st.markdown("<small style='color:#007a30;'>✅ Al día</small>", unsafe_allow_html=True)
                             paga_ahora = 0.0
                     nuevos_pagos_cuota[int(row['id'])] = (float(row['monto_pagado']), float(row['monto']), paga_ahora, deuda_partido, jid)
 
@@ -1805,7 +1805,7 @@ if IS_ADMIN:
                     with mc_nom:
                         st.markdown(f"**{row['nombre']}** — {row['concepto']}")
                     with mc_debe:
-                        st.markdown(f"Debe: <span style='color:#ff6b6b;font-weight:700;'>${deuda_m:,.2f}</span>", unsafe_allow_html=True)
+                        st.markdown(f"Debe: <span style='color:#cc0000;font-weight:700;'>${deuda_m:,.2f}</span>", unsafe_allow_html=True)
                     with mc_paga:
                         paga_m = st.number_input("Paga ahora $", min_value=0.0,
                             max_value=float(deuda_m), value=0.0, step=0.5,
@@ -1951,7 +1951,7 @@ if IS_ADMIN:
     total_gastado = q("SELECT COALESCE(SUM(costo_arbitraje+costo_agua),0) as t FROM partidos")['t'][0]
     with c3:
         st.markdown(f"""<div class="metric-card"><div class="label">💸 Total Gastado</div>
-            <div class="valor" style="color:#ff6b6b;">${total_gastado:,.0f}</div></div>""", unsafe_allow_html=True)
+            <div class="valor" style="color:#cc0000;">${total_gastado:,.0f}</div></div>""", unsafe_allow_html=True)
 
     st.markdown('<div class="section-header">📒 MOVIMIENTOS DE CAJA</div>', unsafe_allow_html=True)
     caja_df = q("""SELECT c.fecha, c.concepto, c.monto,
@@ -2290,7 +2290,7 @@ with TAB_HISTORIAL:
                     <div class="jugador-num" style="background:#3d2000;color:#f0c040;font-size:18px;">{medal}</div>
                     <div style="flex:1;">
                         <div style="font-weight:800;font-size:16px;">{row['nombre']}</div>
-                        <div style="color:#d4b8b8;font-size:12px;">{row['posicion'] or '—'}</div>
+                        <div style="color:#7a3030;font-size:12px;">{row['posicion'] or '—'}</div>
                     </div>
                     <div style="font-family:'Bebas Neue',sans-serif;font-size:36px;color:#f0c040;">{int(row['goles'])} ⚽</div>
                 </div>""", unsafe_allow_html=True)
