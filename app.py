@@ -1394,15 +1394,13 @@ if IS_ADMIN:
     if len(partidos_list) == 0:
         st.info("Primero guarda una alineación en la Fase 1.")
     else:
-        opciones_f2 = [f"{r['fecha']} vs {r['rival']}" for _, r in partidos_list.iterrows()]
-        ids_list = partidos_list['id'].tolist()
-        ultimo_pid = st.session_state.get('ultimo_pid', None)
-        if ultimo_pid and ultimo_pid in ids_list:
-            idx_f2 = ids_list.index(ultimo_pid)
+        opciones_f2 = ["— Selecciona un partido —"] + [f"{r['fecha']} vs {r['rival']}" for _, r in partidos_list.iterrows()]
+        sel_f2 = st.selectbox("Selecciona el partido", opciones_f2, key="sel_f2", index=0)
+
+        if sel_f2 == "— Selecciona un partido —":
+            st.info("Selecciona el partido que acabas de guardar en la Fase 1.")
         else:
-            idx_f2 = 0
-        sel_f2 = st.selectbox("Selecciona el partido", opciones_f2, key="sel_f2", index=idx_f2)
-        pid_f2 = int(partidos_list.iloc[opciones_f2.index(sel_f2)]['id'])
+            pid_f2 = int(partidos_list.iloc[opciones_f2[1:].index(sel_f2)]['id'])
         p_data = partidos_list[partidos_list['id']==pid_f2].iloc[0]
 
         # Participantes titulares de este partido
@@ -1721,15 +1719,12 @@ if IS_ADMIN:
     if len(partidos_list) == 0:
         st.info("Aún no hay partidos registrados.")
     else:
-        opciones_f3 = [f"{r['fecha']} vs {r['rival']}" for _, r in partidos_list.iterrows()]
-        ultimo_pid = st.session_state.get('ultimo_pid', None)
-        ids_list_f3 = partidos_list['id'].tolist()
-        if ultimo_pid and ultimo_pid in ids_list_f3:
-            idx_f3 = ids_list_f3.index(ultimo_pid)
+        opciones_f3 = ["— Selecciona un partido —"] + [f"{r['fecha']} vs {r['rival']}" for _, r in partidos_list.iterrows()]
+        sel_f3 = st.selectbox("Selecciona el partido", opciones_f3, key="sel_f3", index=0)
+        if sel_f3 == "— Selecciona un partido —":
+            st.info("Selecciona el partido para registrar los cobros.")
         else:
-            idx_f3 = 0
-        sel_f3 = st.selectbox("Selecciona el partido", opciones_f3, key="sel_f3", index=idx_f3)
-        pid_f3 = int(partidos_list.iloc[opciones_f3.index(sel_f3)]['id'])
+            pid_f3 = int(partidos_list.iloc[opciones_f3[1:].index(sel_f3)]['id'])
 
         # ── Cuotas de arbitraje ──────────────────────────────────────────
         pagos_df = q("""
