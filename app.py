@@ -1528,14 +1528,17 @@ if IS_ADMIN:
                 nueva_tarj_tipo = st.selectbox("Tipo", ["amarilla", "roja"], key=f"ntt_{pid_f2}")
             with na3:
                 nueva_tarj_min = st.number_input("Min.", min_value=1, max_value=120,
-                                                 value=1, key=f"ntm_{pid_f2}")
+                                                 value=st.session_state.get(f"ntm_{pid_f2}", 1),
+                                                 key=f"ntm_{pid_f2}")
             with na4:
                 st.markdown("<br>", unsafe_allow_html=True)
                 if st.button("➕ Agregar", key=f"add_tarj_{pid_f2}"):
+                    # Leer el minuto directamente del session_state para asegurar el valor correcto
+                    min_capturado = st.session_state.get(f"ntm_{pid_f2}", 1)
                     st.session_state[key_tarj].append({
-                        "jugador": nueva_tarj_jug,
-                        "tipo": nueva_tarj_tipo,
-                        "minuto": nueva_tarj_min
+                        "jugador": st.session_state.get(f"ntj_{pid_f2}", nueva_tarj_jug),
+                        "tipo":    st.session_state.get(f"ntt_{pid_f2}", nueva_tarj_tipo),
+                        "minuto":  min_capturado
                     })
                     st.rerun()
 
