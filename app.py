@@ -822,29 +822,34 @@ st.markdown("""
 @import url('https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Nunito:wght@400;600;700;800&display=swap');
 
 :root {
-    --verde: #9b2335;
-    --verde-claro: #f0c040;
-    --verde-oscuro: #6b1020;
-    --blanco: #ffffff;
-    --gris: #d4b8b8;
-    --alerta: #f0c040;
-    --peligro: #ff6b6b;
-    --fondo: #1a0808;
-    --card: #2d1010;
-    --card2: #3d1515;
-    --borde: #6b2525;
+    --rojo:        #9b2335;
+    --rojo-oscuro: #6b1020;
+    --amarillo:    #f0c040;
+    --blanco:      #ffffff;
+    --texto:       #f0e8e8;
+    --texto-sub:   #c8a8a8;
+    --alerta:      #f0c040;
+    --peligro:     #ff6b6b;
+    --fondo:       #1a0808;
+    --card:        #2d1010;
+    --card2:       #3d1515;
+    --borde:       #7a3030;
 }
 
 html, body, [class*="css"] {
     font-family: 'Nunito', sans-serif;
     background-color: var(--fondo);
-    color: var(--blanco);
+    color: var(--texto);
 }
-
-h1, h2, h3 { font-family: 'Bebas Neue', sans-serif; letter-spacing: 2px; }
+h1, h2, h3 { font-family: 'Bebas Neue', sans-serif; letter-spacing: 2px; color: var(--texto); }
 
 .stApp { background-color: var(--fondo); }
 
+/* Texto general siempre blanco/claro */
+p, span, div, li, td, th, small { color: var(--texto); }
+.stMarkdown p { color: var(--texto) !important; }
+
+/* Tabs */
 .stTabs [data-baseweb="tab-list"] {
     background: var(--card);
     border-radius: 12px;
@@ -854,7 +859,7 @@ h1, h2, h3 { font-family: 'Bebas Neue', sans-serif; letter-spacing: 2px; }
 }
 .stTabs [data-baseweb="tab"] {
     background: transparent;
-    color: var(--gris);
+    color: #e0c0c0 !important;
     border-radius: 8px;
     font-family: 'Nunito', sans-serif;
     font-weight: 700;
@@ -862,10 +867,11 @@ h1, h2, h3 { font-family: 'Bebas Neue', sans-serif; letter-spacing: 2px; }
     padding: 8px 14px;
 }
 .stTabs [aria-selected="true"] {
-    background: var(--verde) !important;
+    background: var(--rojo) !important;
     color: white !important;
 }
 
+/* Metric cards */
 .metric-card {
     background: var(--card);
     border: 1px solid var(--borde);
@@ -875,7 +881,7 @@ h1, h2, h3 { font-family: 'Bebas Neue', sans-serif; letter-spacing: 2px; }
 }
 .metric-card .label {
     font-size: 11px;
-    color: var(--gris);
+    color: #e0c0c0;
     text-transform: uppercase;
     letter-spacing: 1px;
     margin-bottom: 4px;
@@ -883,15 +889,16 @@ h1, h2, h3 { font-family: 'Bebas Neue', sans-serif; letter-spacing: 2px; }
 .metric-card .valor {
     font-family: 'Bebas Neue', sans-serif;
     font-size: 36px;
-    color: var(--verde-claro);
+    color: var(--amarillo);
     line-height: 1;
 }
 .metric-card .sub {
     font-size: 12px;
-    color: var(--gris);
+    color: #c8a8a8;
     margin-top: 4px;
 }
 
+/* Jugador cards */
 .jugador-card {
     background: var(--card);
     border: 1px solid var(--borde);
@@ -902,36 +909,89 @@ h1, h2, h3 { font-family: 'Bebas Neue', sans-serif; letter-spacing: 2px; }
     align-items: center;
     gap: 12px;
 }
+.jugador-card .jugador-nombre {
+    font-weight: 800;
+    font-size: 16px;
+    color: #ffffff !important;
+}
+.jugador-card .jugador-pos {
+    color: #d4b0b0;
+    font-size: 12px;
+    margin-bottom: 4px;
+}
 .jugador-num {
-    background: var(--verde-oscuro);
-    color: var(--verde-claro);
+    background: var(--rojo-oscuro);
+    color: var(--amarillo);
     font-family: 'Bebas Neue', sans-serif;
     font-size: 22px;
-    width: 40px;
-    height: 40px;
+    width: 44px;
+    height: 44px;
     border-radius: 8px;
     display: flex;
     align-items: center;
     justify-content: center;
     flex-shrink: 0;
+    border: 1px solid var(--borde);
 }
+
+/* Badges */
 .badge {
     display: inline-block;
-    padding: 2px 8px;
+    padding: 3px 10px;
     border-radius: 20px;
     font-size: 11px;
     font-weight: 700;
     margin-right: 4px;
+    margin-top: 2px;
 }
-.badge-amarilla { background: #3d3000; color: #f0c040; border: 1px solid #f0c040; }
-.badge-roja     { background: #3d0000; color: #ff6b6b; border: 1px solid #ff6b6b; }
-.badge-deuda    { background: #3d1500; color: #ffaa55; border: 1px solid #ffaa55; }
-.badge-ok       { background: #003d1a; color: #50e080; border: 1px solid #50e080; }
-.badge-exento   { background: #003340; color: #55bbee; border: 1px solid #55bbee; }
-.badge-sancion  { background: #9b2335; color: white; }
+.badge-amarilla { background: #4a3800; color: #ffd700; border: 1px solid #ffd700; }
+.badge-roja     { background: #4a0000; color: #ff8080; border: 1px solid #ff6b6b; }
+.badge-deuda    { background: #4a2000; color: #ffcc88; border: 1px solid #ffaa55; }
+.badge-ok       { background: #004a20; color: #80ffaa; border: 1px solid #50e080; }
+.badge-exento   { background: #004050; color: #88ddff; border: 1px solid #55bbee; }
+.badge-sancion  { background: #9b2335; color: #ffffff; border: 1px solid #ff6b6b; }
 
-.stDataFrame { border-radius: 12px; overflow: hidden; }
+/* Section headers */
+.section-header {
+    font-family: 'Bebas Neue', sans-serif;
+    font-size: 22px;
+    color: var(--amarillo);
+    letter-spacing: 2px;
+    border-bottom: 2px solid var(--borde);
+    padding-bottom: 6px;
+    margin: 18px 0 12px 0;
+}
 
+/* Alert boxes */
+.alerta-box {
+    background: #2a1a00;
+    border: 1px solid var(--amarillo);
+    border-radius: 10px;
+    padding: 12px 16px;
+    margin-bottom: 8px;
+    font-size: 14px;
+    color: #ffe0a0 !important;
+}
+.peligro-box {
+    background: #3a0000;
+    border: 1px solid #ff6b6b;
+    border-radius: 10px;
+    padding: 12px 16px;
+    margin-bottom: 8px;
+    font-size: 14px;
+    color: #ffaaaa !important;
+}
+.ok-box {
+    background: #002a10;
+    border: 1px solid #50e080;
+    border-radius: 10px;
+    padding: 12px 16px;
+    margin-bottom: 8px;
+    font-size: 14px;
+    color: #aaffcc !important;
+}
+
+/* Form inputs */
 .stTextInput input, .stNumberInput input {
     background: var(--card2) !important;
     border: 1px solid var(--borde) !important;
@@ -943,69 +1003,50 @@ h1, h2, h3 { font-family: 'Bebas Neue', sans-serif; letter-spacing: 2px; }
     border: 1px solid var(--borde) !important;
     color: #ffffff !important;
 }
-label, .stTextInput label, .stNumberInput label, .stSelectbox label,
-.stDateInput label, .stMultiSelect label, .stTextArea label,
-div[data-testid="stWidgetLabel"] p { color: #ffffff !important; font-weight: 600 !important; }
 .stTextArea textarea {
     background: var(--card2) !important;
     border: 1px solid var(--borde) !important;
     color: #ffffff !important;
     border-radius: 8px !important;
 }
+label, .stTextInput label, .stNumberInput label, .stSelectbox label,
+.stDateInput label, .stMultiSelect label, .stTextArea label,
+div[data-testid="stWidgetLabel"] p { color: #ffffff !important; font-weight: 600 !important; }
+
 .stMultiSelect div[data-baseweb="select"] { background: var(--card2) !important; }
-.stMultiSelect [data-baseweb="tag"] { background: var(--verde) !important; color: white !important; }
+.stMultiSelect [data-baseweb="tag"] { background: var(--rojo) !important; color: white !important; }
 .stMultiSelect input { color: #ffffff !important; }
 .stSelectbox div[data-baseweb="select"] > div { background: var(--card2) !important; color: #ffffff !important; }
 
+/* Buttons */
 .stButton button {
-    background: var(--verde);
+    background: var(--rojo);
     color: white;
     border: none;
     border-radius: 8px;
     font-family: 'Nunito', sans-serif;
     font-weight: 700;
     padding: 8px 20px;
-    transition: background 0.2s;
+    transition: all 0.2s;
 }
-.stButton button:hover { background: var(--verde-claro); color: #1a0808; }
+.stButton button:hover { background: #c43048; color: white; }
 
-.section-header {
-    font-family: 'Bebas Neue', sans-serif;
-    font-size: 22px;
-    color: #f0c040;
-    letter-spacing: 2px;
-    border-bottom: 2px solid var(--borde);
-    padding-bottom: 6px;
-    margin: 18px 0 12px 0;
-}
+/* DataFrames */
+.stDataFrame { border-radius: 12px; overflow: hidden; }
+.stDataFrame th { background: var(--rojo) !important; color: white !important; }
+.stDataFrame td { color: #f0e8e8 !important; }
 
-.alerta-box {
-    background: #2a1a00;
-    border: 1px solid var(--alerta);
-    border-radius: 10px;
-    padding: 12px 16px;
-    margin-bottom: 8px;
-    font-size: 14px;
-}
-.peligro-box {
-    background: #2a0000;
-    border: 1px solid var(--peligro);
-    border-radius: 10px;
-    padding: 12px 16px;
-    margin-bottom: 8px;
-    font-size: 14px;
-}
-.ok-box {
-    background: #002a10;
-    border: 1px solid var(--verde-claro);
-    border-radius: 10px;
-    padding: 12px 16px;
-    margin-bottom: 8px;
-    font-size: 14px;
-}
-
+/* Checkboxes */
 div[data-testid="stCheckbox"] label { color: #ffffff !important; }
-div[data-testid="stMultiSelect"] span { background: var(--verde-oscuro) !important; color: #ffffff !important; }
+div[data-testid="stMultiSelect"] span { background: var(--rojo-oscuro) !important; color: #ffffff !important; }
+
+/* Info / warning / success boxes */
+.stAlert { border-radius: 10px !important; }
+div[data-testid="stNotification"] { color: #ffffff !important; }
+
+/* Caption and small text */
+.stCaption { color: #d4b0b0 !important; }
+small { color: #d4b0b0 !important; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -1150,8 +1191,8 @@ if IS_ADMIN:
         <div class="jugador-card">
             <div class="jugador-num">{num_display}</div>
             <div style="flex:1;">
-                <div style="font-weight:800; font-size:16px;">{j['nombre']}</div>
-                <div style="color:var(--gris); font-size:12px; margin-bottom:4px;">{j['posicion'] or 'Sin posición'}</div>
+                <div class="jugador-nombre" style="font-weight:800; font-size:16px; color:#ffffff;">{j['nombre']}</div>
+                <div class="jugador-pos" style="color:#d4b0b0; font-size:12px; margin-bottom:4px;">{j['posicion'] or 'Sin posición'}</div>
                 <div>{badges}</div>
             </div>
         </div>
