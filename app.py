@@ -821,45 +821,28 @@ st.markdown("""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Nunito:wght@400;600;700;800&display=swap');
 
-:root {
-    --rojo:        #9b2335;
-    --rojo-oscuro: #6b1020;
-    --amarillo:    #f0c040;
-    --blanco:      #ffffff;
-    --texto:       #f0e8e8;
-    --texto-sub:   #c8a8a8;
-    --alerta:      #f0c040;
-    --peligro:     #ff6b6b;
-    --fondo:       #1a0808;
-    --card:        #2d1010;
-    --card2:       #3d1515;
-    --borde:       #7a3030;
+html, body, .stApp, [class*="css"] {
+    font-family: 'Nunito', sans-serif !important;
+    background-color: #f5f0f0 !important;
+    color: #1a0808 !important;
 }
 
-html, body, [class*="css"] {
-    font-family: 'Nunito', sans-serif;
-    background-color: var(--fondo);
-    color: var(--texto);
+h1, h2, h3 {
+    font-family: 'Bebas Neue', sans-serif !important;
+    letter-spacing: 2px;
+    color: #1a0808 !important;
 }
-h1, h2, h3 { font-family: 'Bebas Neue', sans-serif; letter-spacing: 2px; color: var(--texto); }
 
-.stApp { background-color: var(--fondo); }
-
-/* Texto general siempre blanco/claro */
-p, span, div, li, td, th, small { color: var(--texto); }
-.stMarkdown p { color: var(--texto) !important; }
-
-/* Tabs */
 .stTabs [data-baseweb="tab-list"] {
-    background: var(--card);
+    background: #ffffff;
     border-radius: 12px;
     padding: 4px;
     gap: 4px;
-    border: 1px solid var(--borde);
+    border: 1px solid #d4a0a0;
 }
 .stTabs [data-baseweb="tab"] {
     background: transparent;
-    color: #e0c0c0 !important;
+    color: #5a1020 !important;
     border-radius: 8px;
     font-family: 'Nunito', sans-serif;
     font-weight: 700;
@@ -867,21 +850,20 @@ p, span, div, li, td, th, small { color: var(--texto); }
     padding: 8px 14px;
 }
 .stTabs [aria-selected="true"] {
-    background: var(--rojo) !important;
+    background: #9b2335 !important;
     color: white !important;
 }
 
-/* Metric cards */
 .metric-card {
-    background: var(--card);
-    border: 1px solid var(--borde);
+    background: #ffffff;
+    border: 1px solid #d4a0a0;
     border-radius: 14px;
     padding: 18px 20px;
     margin-bottom: 12px;
 }
 .metric-card .label {
     font-size: 11px;
-    color: #e0c0c0;
+    color: #7a3030 !important;
     text-transform: uppercase;
     letter-spacing: 1px;
     margin-bottom: 4px;
@@ -889,19 +871,18 @@ p, span, div, li, td, th, small { color: var(--texto); }
 .metric-card .valor {
     font-family: 'Bebas Neue', sans-serif;
     font-size: 36px;
-    color: var(--amarillo);
+    color: #9b2335 !important;
     line-height: 1;
 }
 .metric-card .sub {
     font-size: 12px;
-    color: #c8a8a8;
+    color: #7a3030 !important;
     margin-top: 4px;
 }
 
-/* Jugador cards */
 .jugador-card {
-    background: var(--card);
-    border: 1px solid var(--borde);
+    background: #ffffff;
+    border: 1px solid #d4a0a0;
     border-radius: 12px;
     padding: 14px 16px;
     margin-bottom: 8px;
@@ -909,19 +890,9 @@ p, span, div, li, td, th, small { color: var(--texto); }
     align-items: center;
     gap: 12px;
 }
-.jugador-card .jugador-nombre {
-    font-weight: 800;
-    font-size: 16px;
-    color: #ffffff !important;
-}
-.jugador-card .jugador-pos {
-    color: #d4b0b0;
-    font-size: 12px;
-    margin-bottom: 4px;
-}
 .jugador-num {
-    background: var(--rojo-oscuro);
-    color: var(--amarillo);
+    background: #9b2335;
+    color: #f0c040 !important;
     font-family: 'Bebas Neue', sans-serif;
     font-size: 22px;
     width: 44px;
@@ -931,10 +902,8 @@ p, span, div, li, td, th, small { color: var(--texto); }
     align-items: center;
     justify-content: center;
     flex-shrink: 0;
-    border: 1px solid var(--borde);
 }
 
-/* Badges */
 .badge {
     display: inline-block;
     padding: 3px 10px;
@@ -942,124 +911,72 @@ p, span, div, li, td, th, small { color: var(--texto); }
     font-size: 11px;
     font-weight: 700;
     margin-right: 4px;
-    margin-top: 2px;
 }
-.badge-amarilla { background: #4a3800; color: #ffd700; border: 1px solid #ffd700; }
-.badge-roja     { background: #4a0000; color: #ff8080; border: 1px solid #ff6b6b; }
-.badge-deuda    { background: #4a2000; color: #ffcc88; border: 1px solid #ffaa55; }
-.badge-ok       { background: #004a20; color: #80ffaa; border: 1px solid #50e080; }
-.badge-exento   { background: #004050; color: #88ddff; border: 1px solid #55bbee; }
-.badge-sancion  { background: #9b2335; color: #ffffff; border: 1px solid #ff6b6b; }
+.badge-amarilla { background: #fff3cd; color: #7a5200 !important; border: 1px solid #e0a800; }
+.badge-roja     { background: #fde8e8; color: #7a0000 !important; border: 1px solid #e05050; }
+.badge-deuda    { background: #ffecd8; color: #7a3200 !important; border: 1px solid #e07820; }
+.badge-ok       { background: #d8f5e8; color: #005a20 !important; border: 1px solid #30a860; }
+.badge-exento   { background: #d8eeff; color: #004070 !important; border: 1px solid #3080cc; }
+.badge-sancion  { background: #9b2335; color: #ffffff !important; border: 1px solid #cc3048; }
 
-/* Section headers */
 .section-header {
     font-family: 'Bebas Neue', sans-serif;
     font-size: 22px;
-    color: var(--amarillo);
+    color: #9b2335 !important;
     letter-spacing: 2px;
-    border-bottom: 2px solid var(--borde);
+    border-bottom: 2px solid #d4a0a0;
     padding-bottom: 6px;
     margin: 18px 0 12px 0;
 }
 
-/* Alert boxes */
 .alerta-box {
-    background: #2a1a00;
-    border: 1px solid var(--amarillo);
+    background: #fff8e0;
+    border: 1px solid #e0a800;
     border-radius: 10px;
     padding: 12px 16px;
     margin-bottom: 8px;
     font-size: 14px;
-    color: #ffe0a0 !important;
+    color: #5a3a00 !important;
 }
 .peligro-box {
-    background: #3a0000;
-    border: 1px solid #ff6b6b;
+    background: #fde8e8;
+    border: 1px solid #e05050;
     border-radius: 10px;
     padding: 12px 16px;
     margin-bottom: 8px;
     font-size: 14px;
-    color: #ffaaaa !important;
+    color: #7a0000 !important;
 }
 .ok-box {
-    background: #002a10;
-    border: 1px solid #50e080;
+    background: #e8f5ee;
+    border: 1px solid #30a860;
     border-radius: 10px;
     padding: 12px 16px;
     margin-bottom: 8px;
     font-size: 14px;
-    color: #aaffcc !important;
+    color: #005a20 !important;
 }
 
-/* Form inputs */
-.stTextInput input, .stNumberInput input {
-    background: var(--card2) !important;
-    border: 1px solid var(--borde) !important;
-    color: #ffffff !important;
-    border-radius: 8px !important;
-}
-.stDateInput input {
-    background: var(--card2) !important;
-    border: 1px solid var(--borde) !important;
-    color: #ffffff !important;
-}
-.stTextArea textarea {
-    background: var(--card2) !important;
-    border: 1px solid var(--borde) !important;
-    color: #ffffff !important;
-    border-radius: 8px !important;
-}
-label, .stTextInput label, .stNumberInput label, .stSelectbox label,
-.stDateInput label, .stMultiSelect label, .stTextArea label,
-div[data-testid="stWidgetLabel"] p { color: #ffffff !important; font-weight: 600 !important; }
-
-.stMultiSelect div[data-baseweb="select"] { background: var(--card2) !important; }
-.stMultiSelect [data-baseweb="tag"] { background: var(--rojo) !important; color: white !important; }
-.stMultiSelect input { color: #ffffff !important; }
-.stSelectbox div[data-baseweb="select"] > div { background: var(--card2) !important; color: #ffffff !important; }
-
-/* Buttons */
 .stButton button {
-    background: var(--rojo);
-    color: white;
+    background: #9b2335 !important;
+    color: white !important;
     border: none;
     border-radius: 8px;
     font-family: 'Nunito', sans-serif;
     font-weight: 700;
     padding: 8px 20px;
-    transition: all 0.2s;
 }
-.stButton button:hover { background: #c43048; color: white; }
+.stButton button:hover { background: #c43048 !important; }
 
-/* DataFrames */
-.stDataFrame { border-radius: 12px; overflow: hidden; }
-.stDataFrame th { background: var(--rojo) !important; color: white !important; }
-.stDataFrame td { color: #f0e8e8 !important; }
+[data-testid="stSidebar"] {
+    background: #ffffff !important;
+    border-right: 1px solid #d4a0a0;
+}
 
-/* Dropdowns y listas desplegables - fondo blanco con texto oscuro */
-div[data-baseweb="popover"] { background: #ffffff !important; }
-div[data-baseweb="menu"] { background: #ffffff !important; }
-div[data-baseweb="menu"] li { color: #1a0808 !important; background: #ffffff !important; }
-div[data-baseweb="menu"] li:hover { background: #f0e0e0 !important; color: #1a0808 !important; }
-div[data-baseweb="option"] { color: #1a0808 !important; background: #ffffff !important; }
-div[data-baseweb="option"]:hover { background: #f0dede !important; }
-ul[data-testid="stSelectboxVirtualDropdown"] li { color: #1a0808 !important; }
-/* Multiselect dropdown list */
-div[role="listbox"] { background: #ffffff !important; }
-div[role="listbox"] li { color: #1a0808 !important; }
-div[role="option"] { color: #1a0808 !important; background: #ffffff !important; }
-div[role="option"]:hover { background: #f5e0e0 !important; color: #1a0808 !important; }
-/* Selected item highlight */
-div[aria-selected="true"] { background: #f0dede !important; color: #9b2335 !important; font-weight: 700 !important; }
-div[data-testid="stMultiSelect"] span { background: var(--rojo-oscuro) !important; color: #ffffff !important; }
+div[data-testid="stWidgetLabel"] p,
+label { color: #1a0808 !important; font-weight: 600 !important; }
 
-/* Info / warning / success boxes */
-.stAlert { border-radius: 10px !important; }
-div[data-testid="stNotification"] { color: #ffffff !important; }
-
-/* Caption and small text */
-.stCaption { color: #d4b0b0 !important; }
-small { color: #d4b0b0 !important; }
+.stCaption { color: #7a3030 !important; }
 </style>
 """, unsafe_allow_html=True)
 
