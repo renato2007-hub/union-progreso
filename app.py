@@ -1719,14 +1719,12 @@ if IS_ADMIN:
         else:
             pid_f3 = int(partidos_list.iloc[opciones_f3[1:].index(sel_f3)]['id'])
 
-            # ── Auto-crear pagos para suplentes que no tienen cuota ────────
-            # Detecta suplentes sin pago registrado y los agrega automáticamente
+            # ── Auto-crear pagos para suplentes no exentos sin cuota ────────
             monto_ref = q("SELECT MAX(monto) as m FROM pagos WHERE partido_id=?", (pid_f3,))
             monto_cuota_f3 = float(monto_ref.iloc[0]['m']) if len(monto_ref)>0 and monto_ref.iloc[0]['m'] else 0.0
             if monto_cuota_f3 > 0:
                 suplentes_sin_pago = q("""
-                    SELECT pa.jugador_id, j.nombre, j.exento_arbitraje
-                    FROM participaciones pa
+                    SELECT pa.jugador_id FROM participaciones pa
                     JOIN jugadores j ON j.id=pa.jugador_id
                     WHERE pa.partido_id=? AND pa.rol='cambio'
                       AND j.exento_arbitraje=0
@@ -1743,16 +1741,34 @@ if IS_ADMIN:
                     conn_fix.commit(); conn_fix.close()
                     st.rerun()
 
-            # ── Cuotas y multas del partido ──────────────────────────────
+            # ── Lista completa: jugadores con cuota O con multa ───────────
+            # Incluye exentos de arbitraje si tienen multa por tarjeta
             pagos_df = q("""
                 SELECT pg.id, j.nombre, j.id as jugador_id,
                        pg.monto, COALESCE(pg.monto_pagado,0) as monto_pagado, pg.pagado,
                        COALESCE(pa.rol,'N/D') as rol
                 FROM pagos pg
                 JOIN jugadores j ON pg.jugador_id=j.id
-                LEFT JOIN participaciones pa ON pa.jugador_id=pg.jugador_id AND pa.partido_id=pg.partido_id
-                WHERE pg.partido_id=? ORDER BY pa.rol DESC, j.nombre
-            """, (pid_f3,))
+                LEFT JOIN participaciones pa
+                    ON pa.jugador_id=pg.jugador_id AND pa.partido_id=pg.partido_id
+                WHERE pg.partido_id=?
+
+                UNION
+
+                SELECT -m.jugador_id as id, j.nombre, j.id as jugador_id,
+                       0 as monto, 0 as monto_pagado, 1 as pagado,
+                       COALESCE(pa.rol,'N/D') as rol
+                FROM multas m
+                JOIN jugadores j ON j.id=m.jugador_id
+                LEFT JOIN participaciones pa
+                    ON pa.jugador_id=m.jugador_id AND pa.partido_id=m.partido_id
+                WHERE m.partido_id=? AND m.pagado=0
+                  AND m.jugador_id NOT IN (
+                      SELECT jugador_id FROM pagos WHERE partido_id=?
+                  )
+
+                ORDER BY rol DESC, nombre
+            """, (pid_f3, pid_f3, pid_f3))
 
             if len(pagos_df) > 0:
                 st.markdown("**⚽ Cuotas de arbitraje**")
