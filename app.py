@@ -1376,9 +1376,12 @@ if IS_ADMIN:
                 # Limpiar borrador y guardar el pid del partido recién creado
                 st.session_state['f1_draft'] = {}
                 st.session_state['ultimo_pid'] = pid
-                resumen_cambios = ", ".join([f"{e} x {s} (min.{m})" for s,e,m in cambios_data]) if cambios_data else "ninguno"
-                st.success(f"✅ Alineación guardada — {len(f1_titulares)} titulares, "
-                           f"{len(cambios_data)} cambio(s). Ve a Fase 2 para registrar los eventos.")
+                # Limpiar selectbox de fase 2 y 3 para que el index funcione
+                for k in ['sel_f2', 'sel_f3']:
+                    if k in st.session_state:
+                        del st.session_state[k]
+                st.success(f"✅ Alineación guardada — {len(f1_titulares)} titulares. "
+                           f"Fase 2 ya apunta a este partido.")
                 st.rerun()
 
     st.markdown("---")
@@ -1392,13 +1395,12 @@ if IS_ADMIN:
         st.info("Primero guarda una alineación en la Fase 1.")
     else:
         opciones_f2 = [f"{r['fecha']} vs {r['rival']}" for _, r in partidos_list.iterrows()]
-        # Por defecto: el último partido creado en Fase 1, o el más reciente
-        ultimo_pid = st.session_state.get('ultimo_pid', None)
         ids_list = partidos_list['id'].tolist()
+        ultimo_pid = st.session_state.get('ultimo_pid', None)
         if ultimo_pid and ultimo_pid in ids_list:
             idx_f2 = ids_list.index(ultimo_pid)
         else:
-            idx_f2 = 0  # más reciente
+            idx_f2 = 0
         sel_f2 = st.selectbox("Selecciona el partido", opciones_f2, key="sel_f2", index=idx_f2)
         pid_f2 = int(partidos_list.iloc[opciones_f2.index(sel_f2)]['id'])
         p_data = partidos_list[partidos_list['id']==pid_f2].iloc[0]
