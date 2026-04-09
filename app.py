@@ -1819,9 +1819,10 @@ if IS_ADMIN:
                         st.markdown(f"<small style='color:#d4b8b8;'>Total debe</small><br><span style='color:#ff6b6b;font-weight:800;'>${deuda_total:,.2f}</span>", unsafe_allow_html=True)
                     with col_paga:
                         paga_ahora = st.number_input("Paga $", min_value=0.0,
-                            max_value=float(deuda_partido), value=0.0, step=0.5,
+                            max_value=float(deuda_total), value=0.0, step=0.5,
+                            help=f"Puede pagar hasta ${deuda_total:,.2f} (incluye deuda anterior)",
                             key=f"f3_cuota_{row['id']}", label_visibility="visible")
-                    nuevos_pagos_cuota[int(row['id'])] = (float(row['monto_pagado']), float(row['monto']), paga_ahora)
+                    nuevos_pagos_cuota[int(row['id'])] = (float(row['monto_pagado']), float(row['monto']), paga_ahora, float(deuda_partido), jid)
 
             # ── Multas por tarjetas ──────────────────────────────────────────
             multas_df = q("""SELECT m.id, j.nombre, j.id as jugador_id, m.concepto, m.monto,
@@ -1858,22 +1859,48 @@ if IS_ADMIN:
             if st.button("💾 GUARDAR COBROS", type="primary", key="btn_fase3"):
                 conn = get_conn(); cambios = 0
 
-                # Cuotas con pago parcial
+                # Cuotas con pago — puede pagar más que la deuda del partido actual
                 if len(pagos_df) > 0:
-                    for pid_p, (ya_pagado, monto_total, paga_ahora) in nuevos_pagos_cuota.items():
-                        if paga_ahora > 0:
-                            nuevo_total_pagado = ya_pagado + paga_ahora
-                            saldado = nuevo_total_pagado >= monto_total - 0.001
+                    for pid_p, (ya_pagado, monto_total, paga_ahora, deuda_partido, jid_pago) in nuevos_pagos_cuota.items():
+                        if paga_ahora <= 0:
+                            continue
+                        restante = paga_ahora
+
+                        # 1. Pagar primero la cuota de este partido
+                        pago_este = min(restante, monto_total - ya_pagado)
+                        if pago_este > 0:
+                            nuevo_total = ya_pagado + pago_este
+                            saldado = nuevo_total >= monto_total - 0.001
                             conn.execute("UPDATE pagos SET monto_pagado=?, pagado=? WHERE id=?",
-                                         (nuevo_total_pagado, int(saldado), pid_p))
-                            # Registrar en caja solo el monto que paga ahora
-                            pr = q("SELECT jugador_id, partido_id FROM pagos WHERE id=?", (pid_p,)).iloc[0]
-                            jn = q("SELECT nombre FROM jugadores WHERE id=?", (int(pr['jugador_id']),)).iloc[0]['nombre']
+                                         (nuevo_total, int(saldado), pid_p))
+                            jn = q("SELECT nombre FROM jugadores WHERE id=?", (jid_pago,)).iloc[0]['nombre']
                             conn.execute("INSERT INTO caja (partido_id,concepto,monto,fecha) VALUES (?,?,?,?)",
-                                (pid_f3,
-                                 f"Pago {jn} — {sel_f3}" + (" (parcial)" if not saldado else ""),
-                                 paga_ahora, str(date.today())))
+                                (pid_f3, f"Pago cuota {jn} — {sel_f3}" + ("" if saldado else " (parcial)"),
+                                 pago_este, str(date.today())))
+                            restante -= pago_este
                             cambios += 1
+
+                        # 2. Si sobra, pagar deudas anteriores de otros partidos (más antiguas primero)
+                        if restante > 0.001:
+                            deudas_anteriores = q("""
+                                SELECT id, monto, COALESCE(monto_pagado,0) as mp, partido_id
+                                FROM pagos WHERE jugador_id=? AND pagado=0 AND partido_id!=?
+                                ORDER BY partido_id ASC
+                            """, (jid_pago, pid_f3))
+                            for _, da in deudas_anteriores.iterrows():
+                                if restante <= 0.001: break
+                                debe_da = float(da['monto']) - float(da['mp'])
+                                pago_da = min(restante, debe_da)
+                                nuevo_mp = float(da['mp']) + pago_da
+                                saldado_da = nuevo_mp >= float(da['monto']) - 0.001
+                                conn.execute("UPDATE pagos SET monto_pagado=?, pagado=? WHERE id=?",
+                                             (nuevo_mp, int(saldado_da), int(da['id'])))
+                                jn = q("SELECT nombre FROM jugadores WHERE id=?", (jid_pago,)).iloc[0]['nombre']
+                                conn.execute("INSERT INTO caja (partido_id,concepto,monto,fecha) VALUES (?,?,?,?)",
+                                    (pid_f3, f"Pago deuda anterior {jn} (partido {da['partido_id']})",
+                                     pago_da, str(date.today())))
+                                restante -= pago_da
+                                cambios += 1
 
                 # Multas con pago parcial
                 for multa_id, (ya_pagado, monto_total, paga_ahora) in nuevas_multas.items():
