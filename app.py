@@ -1401,312 +1401,312 @@ if IS_ADMIN:
             st.info("Selecciona el partido que acabas de guardar en la Fase 1.")
         else:
             pid_f2 = int(partidos_list.iloc[opciones_f2[1:].index(sel_f2)]['id'])
-        p_data = partidos_list[partidos_list['id']==pid_f2].iloc[0]
+            p_data = partidos_list[partidos_list['id']==pid_f2].iloc[0]
 
-        # Participantes titulares de este partido
-        partic_f2 = q("""SELECT j.nombre, pa.rol FROM participaciones pa
-                         JOIN jugadores j ON pa.jugador_id=j.id
-                         WHERE pa.partido_id=?""", (pid_f2,))
-        nombres_f2 = partic_f2['nombre'].tolist() if len(partic_f2)>0 else nombres
-        titulares_f2 = partic_f2[partic_f2['rol']=='titular']['nombre'].tolist() if len(partic_f2)>0 else []
+            # Participantes titulares de este partido
+            partic_f2 = q("""SELECT j.nombre, pa.rol FROM participaciones pa
+                             JOIN jugadores j ON pa.jugador_id=j.id
+                             WHERE pa.partido_id=?""", (pid_f2,))
+            nombres_f2 = partic_f2['nombre'].tolist() if len(partic_f2)>0 else nombres
+            titulares_f2 = partic_f2[partic_f2['rol']=='titular']['nombre'].tolist() if len(partic_f2)>0 else []
 
-        # ── Cambios del partido ──────────────────────────────────────────
-        st.markdown("**🔄 Cambios del partido** *(quién sale, quién entra y a qué minuto)*")
+            # ── Cambios del partido ──────────────────────────────────────────
+            st.markdown("**🔄 Cambios del partido** *(quién sale, quién entra y a qué minuto)*")
 
-        # Cargar cambios ya guardados
-        cambios_guardados = q("""SELECT js.nombre as sale, je.nombre as entra, c.minuto
-                                 FROM cambios c
-                                 JOIN jugadores js ON c.jugador_sale_id=js.id
-                                 JOIN jugadores je ON c.jugador_entra_id=je.id
-                                 WHERE c.partido_id=? ORDER BY c.minuto""", (pid_f2,))
-        n_cambios_guardados = len(cambios_guardados)
+            # Cargar cambios ya guardados
+            cambios_guardados = q("""SELECT js.nombre as sale, je.nombre as entra, c.minuto
+                                     FROM cambios c
+                                     JOIN jugadores js ON c.jugador_sale_id=js.id
+                                     JOIN jugadores je ON c.jugador_entra_id=je.id
+                                     WHERE c.partido_id=? ORDER BY c.minuto""", (pid_f2,))
+            n_cambios_guardados = len(cambios_guardados)
 
-        n_cambios_f2 = st.number_input("¿Cuántos cambios hubo?", min_value=0, max_value=5,
-                                        value=n_cambios_guardados, step=1, key="f2_ncambios")
-        cambios_data_f2 = []
-        nombres_ya_entran_f2 = []
-        # Nombres disponibles para salir = titulares del partido
-        disp_sale = titulares_f2 if titulares_f2 else nombres
-        # Nombres disponibles para entrar = NO titulares
-        disp_entra_base = [n for n in nombres if n not in titulares_f2]
+            n_cambios_f2 = st.number_input("¿Cuántos cambios hubo?", min_value=0, max_value=5,
+                                            value=n_cambios_guardados, step=1, key="f2_ncambios")
+            cambios_data_f2 = []
+            nombres_ya_entran_f2 = []
+            # Nombres disponibles para salir = titulares del partido
+            disp_sale = titulares_f2 if titulares_f2 else nombres
+            # Nombres disponibles para entrar = NO titulares
+            disp_entra_base = [n for n in nombres if n not in titulares_f2]
 
-        for i in range(int(n_cambios_f2)):
-            st.markdown(f"<small style='color:#d4b8b8;'>Cambio #{i+1}</small>", unsafe_allow_html=True)
-            # Valores por defecto desde cambios ya guardados
-            default_sale  = str(cambios_guardados.iloc[i]['sale'])  if i < n_cambios_guardados else (disp_sale[0] if disp_sale else nombres[0])
-            default_entra = str(cambios_guardados.iloc[i]['entra']) if i < n_cambios_guardados else None
-            default_min   = int(cambios_guardados.iloc[i]['minuto']) if i < n_cambios_guardados and cambios_guardados.iloc[i]['minuto'] else 45
+            for i in range(int(n_cambios_f2)):
+                st.markdown(f"<small style='color:#d4b8b8;'>Cambio #{i+1}</small>", unsafe_allow_html=True)
+                # Valores por defecto desde cambios ya guardados
+                default_sale  = str(cambios_guardados.iloc[i]['sale'])  if i < n_cambios_guardados else (disp_sale[0] if disp_sale else nombres[0])
+                default_entra = str(cambios_guardados.iloc[i]['entra']) if i < n_cambios_guardados else None
+                default_min   = int(cambios_guardados.iloc[i]['minuto']) if i < n_cambios_guardados and cambios_guardados.iloc[i]['minuto'] else 45
 
-            cc1, cc2, cc3 = st.columns([3, 3, 1])
-            with cc1:
-                idx_sale = disp_sale.index(default_sale) if default_sale in disp_sale else 0
-                sale_f2 = st.selectbox("Sale ↗️", disp_sale, index=idx_sale, key=f"f2_sale_{i}")
-            with cc2:
-                disp_entra = [n for n in disp_entra_base if n not in nombres_ya_entran_f2]
-                if not disp_entra: disp_entra = nombres
-                idx_entra = disp_entra.index(default_entra) if default_entra and default_entra in disp_entra else 0
-                entra_f2 = st.selectbox("Entra ↘️", disp_entra, index=idx_entra, key=f"f2_entra_{i}")
-            with cc3:
-                min_f2 = st.number_input("Min.", min_value=1, max_value=120,
-                                          value=default_min, key=f"f2_minc_{i}")
-            cambios_data_f2.append((sale_f2, entra_f2, min_f2))
-            nombres_ya_entran_f2.append(entra_f2)
+                cc1, cc2, cc3 = st.columns([3, 3, 1])
+                with cc1:
+                    idx_sale = disp_sale.index(default_sale) if default_sale in disp_sale else 0
+                    sale_f2 = st.selectbox("Sale ↗️", disp_sale, index=idx_sale, key=f"f2_sale_{i}")
+                with cc2:
+                    disp_entra = [n for n in disp_entra_base if n not in nombres_ya_entran_f2]
+                    if not disp_entra: disp_entra = nombres
+                    idx_entra = disp_entra.index(default_entra) if default_entra and default_entra in disp_entra else 0
+                    entra_f2 = st.selectbox("Entra ↘️", disp_entra, index=idx_entra, key=f"f2_entra_{i}")
+                with cc3:
+                    min_f2 = st.number_input("Min.", min_value=1, max_value=120,
+                                              value=default_min, key=f"f2_minc_{i}")
+                cambios_data_f2.append((sale_f2, entra_f2, min_f2))
+                nombres_ya_entran_f2.append(entra_f2)
 
-        # Resultado
-        f2c1, f2c2 = st.columns(2)
-        with f2c1:
-            f2_gf = st.number_input("Goles a favor ⚽", min_value=0, step=1,
-                                    value=int(p_data['goles_favor'] or 0), key="f2_gf")
-        with f2c2:
-            f2_gc = st.number_input("Goles en contra 🥅", min_value=0, step=1,
-                                    value=int(p_data['goles_contra'] or 0), key="f2_gc")
+            # Resultado
+            f2c1, f2c2 = st.columns(2)
+            with f2c1:
+                f2_gf = st.number_input("Goles a favor ⚽", min_value=0, step=1,
+                                        value=int(p_data['goles_favor'] or 0), key="f2_gf")
+            with f2c2:
+                f2_gc = st.number_input("Goles en contra 🥅", min_value=0, step=1,
+                                        value=int(p_data['goles_contra'] or 0), key="f2_gc")
 
-        # Goleadores
-        if f2_gf > 0:
-            st.markdown("**⚽ ¿Quién anotó cada gol?**")
-            nombres_con_desc = nombres_f2 + ["⬛ Desconocido / propia puerta"]
-            goles_nuevos = []
-            for i in range(int(f2_gf)):
-                gc1, gc2 = st.columns([4, 1])
-                with gc1:
-                    gol_jug = st.selectbox(f"Gol #{i+1}", nombres_con_desc, key=f"f2_gol_{i}")
-                with gc2:
-                    gol_min = st.number_input("Min.", min_value=1, max_value=120,
-                                              value=1, key=f"f2_min_{i}")
-                goles_nuevos.append((gol_jug, gol_min))
-
-        # Tarjetas — sistema de tarjetas individuales
-        st.markdown("**🟨🟥 Tarjetas del partido**")
-        st.caption("Agrega una fila por cada tarjeta. Si un jugador recibe 2 amarillas en el mismo partido = doble amarilla automática.")
-
-        # Inicializar lista de tarjetas en session_state
-        key_tarj = f"tarjetas_f2_{pid_f2}"
-        if key_tarj not in st.session_state:
-            # Cargar tarjetas ya guardadas de este partido
-            tarj_existentes = q("""SELECT t.tipo, j.nombre FROM tarjetas t
-                                   JOIN jugadores j ON t.jugador_id=j.id
-                                   WHERE t.partido_id=? ORDER BY t.id""", (pid_f2,))
-            st.session_state[key_tarj] = [
-                {"jugador": row['nombre'], "tipo": row['tipo'], "minuto": 1}
-                for _, row in tarj_existentes.iterrows()
-            ] if len(tarj_existentes) > 0 else []
-
-        # Multas por tarjeta
-        key_multa_am  = f"multa_am_{pid_f2}"
-        key_multa_dam = f"multa_dam_{pid_f2}"
-        key_multa_ro  = f"multa_ro_{pid_f2}"
-        mc1, mc2, mc3 = st.columns(3)
-        with mc1:
-            multa_amarilla = st.number_input("💰 Multa amarilla ($)", min_value=0.0,
-                step=0.5, key=key_multa_am, value=0.0,
-                help="Monto que paga el jugador por 1 amarilla simple")
-        with mc2:
-            multa_dam = st.number_input("💰 Multa doble amarilla ($)", min_value=0.0,
-                step=0.5, key=key_multa_dam, value=0.0,
-                help="Monto que paga el jugador por doble amarilla (2 amarillas en el mismo partido)")
-        with mc3:
-            multa_roja = st.number_input("💰 Multa roja directa ($)", min_value=0.0,
-                step=0.5, key=key_multa_ro, value=0.0,
-                help="Monto que paga el jugador por roja directa")
-
-        # Mostrar tarjetas actuales
-        tarjetas_actuales = st.session_state[key_tarj]
-        if tarjetas_actuales:
-            st.markdown("<small style='color:#d4b8b8;'>Tarjetas registradas:</small>", unsafe_allow_html=True)
-            to_remove = []
-            for i, t in enumerate(tarjetas_actuales):
-                tc1, tc2, tc3, tc4 = st.columns([3, 2, 1, 1])
-                with tc1:
-                    st.markdown(f"**{t['jugador']}**")
-                with tc2:
-                    tipo_emoji = "🟨" if t['tipo']=='amarilla' else "🟥"
-                    st.markdown(f"{tipo_emoji} {t['tipo'].capitalize()}")
-                with tc3:
-                    st.markdown(f"min. {t['minuto']}")
-                with tc4:
-                    if st.button("✕", key=f"rm_tarj_{i}_{pid_f2}"):
-                        to_remove.append(i)
-            for idx in reversed(to_remove):
-                st.session_state[key_tarj].pop(idx)
-            if to_remove:
-                st.rerun()
-
-            # Detectar y mostrar dobles amarillas
-            from collections import Counter
-            conteo_por_jugador = Counter(
-                t['jugador'] for t in tarjetas_actuales if t['tipo']=='amarilla'
-            )
-            for jugador, cant in conteo_por_jugador.items():
-                if cant >= 2:
-                    st.markdown(f'<div class="alerta-box">🟨🟨 <b>{jugador}</b> tiene {cant} amarillas en este partido → <b>doble amarilla</b> (1 partido suspensión)</div>',
-                                unsafe_allow_html=True)
-
-        # Agregar nueva tarjeta
-        st.markdown("<small style='color:#d4b8b8;'>Agregar tarjeta:</small>", unsafe_allow_html=True)
-        na1, na2, na3, na4 = st.columns([3, 2, 1, 1])
-        with na1:
-            nueva_tarj_jug = st.selectbox("Jugador", nombres_f2, key=f"ntj_{pid_f2}")
-        with na2:
-            nueva_tarj_tipo = st.selectbox("Tipo", ["amarilla", "roja"], key=f"ntt_{pid_f2}")
-        with na3:
-            nueva_tarj_min = st.number_input("Min.", min_value=1, max_value=120,
-                                             value=1, key=f"ntm_{pid_f2}")
-        with na4:
-            st.markdown("<br>", unsafe_allow_html=True)
-            if st.button("➕ Agregar", key=f"add_tarj_{pid_f2}"):
-                st.session_state[key_tarj].append({
-                    "jugador": nueva_tarj_jug,
-                    "tipo": nueva_tarj_tipo,
-                    "minuto": nueva_tarj_min
-                })
-                st.rerun()
-
-        f2_notas = st.text_area("📝 Notas del partido", height=60,
-                                value=str(p_data['notas'] or ""), key="f2_notas")
-
-        st.markdown("**📋 Comentarios del informe arbitral**")
-        st.caption("Observaciones del árbitro, incidencias, protestas, decisiones polémicas, etc.")
-        f2_arbitral = st.text_area("Informe arbitral", height=80,
-                                   value=str(p_data.get('informe_arbitral', '') or ""),
-                                   key="f2_arbitral",
-                                   placeholder="Ej: El árbitro anuló un gol por fuera de juego en el min. 67. Hubo protestas por la tarjeta roja de Santiago. El partido se detuvo 3 minutos por lluvia...")
-
-        # Vista previa de sanciones
-        tarjetas_preview = st.session_state.get(key_tarj, [])
-        if tarjetas_preview:
-            from collections import Counter
-            st.markdown("**⚠️ Sanciones que se generarán al guardar:**")
-            conteo_am = Counter(t['jugador'] for t in tarjetas_preview if t['tipo']=='amarilla')
-            for nombre, cant in conteo_am.items():
-                if cant >= 2:
-                    st.markdown(f"&nbsp;&nbsp;🟨🟨 **{nombre}** — doble amarilla → 1 partido suspensión")
-                else:
-                    rows = jugadores[jugadores['nombre']==nombre]
-                    if len(rows)>0:
-                        act = tarjetas_amarillas_activas(int(rows.iloc[0]['id']))
-                        if act+1 >= 5:
-                            st.markdown(f"&nbsp;&nbsp;🟨 **{nombre}** — llega a 5 amarillas → 1 partido suspensión")
-                        else:
-                            st.markdown(f"&nbsp;&nbsp;🟨 **{nombre}** — amarilla #{act+1} (sin suspensión aún)")
-            for t in tarjetas_preview:
-                if t['tipo'] == 'roja':
-                    st.markdown(f"&nbsp;&nbsp;🟥 **{t['jugador']}** — roja directa → 2 partidos suspensión")
-
-        if st.button("💾 GUARDAR EVENTOS", type="primary", key="btn_fase2"):
-            from collections import Counter
-            tarjetas_guardar = st.session_state.get(key_tarj, [])
-            conn = get_conn(); c = conn.cursor()
-
-            # Actualizar resultado, notas e informe arbitral
-            c.execute("UPDATE partidos SET goles_favor=?,goles_contra=?,notas=?,informe_arbitral=? WHERE id=?",
-                      (f2_gf, f2_gc, f2_notas, f2_arbitral, pid_f2))
-
-            # Borrar cambios anteriores y reinsertar desde Fase 2
-            c.execute("DELETE FROM cambios WHERE partido_id=?", (pid_f2,))
-            for sale_n, entra_n, min_c in cambios_data_f2:
-                jrow_sale  = jugadores[jugadores['nombre']==sale_n]
-                jrow_entra = jugadores[jugadores['nombre']==entra_n]
-                if len(jrow_sale)>0 and len(jrow_entra)>0:
-                    existe = q("SELECT id FROM participaciones WHERE partido_id=? AND jugador_id=?",
-                               (pid_f2, int(jrow_entra.iloc[0]['id'])))
-                    if len(existe)==0:
-                        c.execute("INSERT INTO participaciones (partido_id,jugador_id,rol) VALUES (?,?,?)",
-                                  (pid_f2, int(jrow_entra.iloc[0]['id']), 'cambio'))
-                    c.execute("""INSERT INTO cambios (partido_id,jugador_sale_id,jugador_entra_id,minuto)
-                                 VALUES (?,?,?,?)""",
-                              (pid_f2, int(jrow_sale.iloc[0]['id']),
-                               int(jrow_entra.iloc[0]['id']), min_c))
-
-            # Borrar goles anteriores y reinsertar
-            c.execute("DELETE FROM goles WHERE partido_id=?", (pid_f2,))
+            # Goleadores
             if f2_gf > 0:
-                for gol_jug, gol_min in goles_nuevos:
-                    if gol_jug == "⬛ Desconocido / propia puerta":
-                        c.execute("INSERT INTO goles (partido_id,jugador_id,minuto,tipo) VALUES (?,NULL,?,?)",
-                                  (pid_f2, gol_min, 'desconocido'))
+                st.markdown("**⚽ ¿Quién anotó cada gol?**")
+                nombres_con_desc = nombres_f2 + ["⬛ Desconocido / propia puerta"]
+                goles_nuevos = []
+                for i in range(int(f2_gf)):
+                    gc1, gc2 = st.columns([4, 1])
+                    with gc1:
+                        gol_jug = st.selectbox(f"Gol #{i+1}", nombres_con_desc, key=f"f2_gol_{i}")
+                    with gc2:
+                        gol_min = st.number_input("Min.", min_value=1, max_value=120,
+                                                  value=1, key=f"f2_min_{i}")
+                    goles_nuevos.append((gol_jug, gol_min))
+
+            # Tarjetas — sistema de tarjetas individuales
+            st.markdown("**🟨🟥 Tarjetas del partido**")
+            st.caption("Agrega una fila por cada tarjeta. Si un jugador recibe 2 amarillas en el mismo partido = doble amarilla automática.")
+
+            # Inicializar lista de tarjetas en session_state
+            key_tarj = f"tarjetas_f2_{pid_f2}"
+            if key_tarj not in st.session_state:
+                # Cargar tarjetas ya guardadas de este partido
+                tarj_existentes = q("""SELECT t.tipo, j.nombre FROM tarjetas t
+                                       JOIN jugadores j ON t.jugador_id=j.id
+                                       WHERE t.partido_id=? ORDER BY t.id""", (pid_f2,))
+                st.session_state[key_tarj] = [
+                    {"jugador": row['nombre'], "tipo": row['tipo'], "minuto": 1}
+                    for _, row in tarj_existentes.iterrows()
+                ] if len(tarj_existentes) > 0 else []
+
+            # Multas por tarjeta
+            key_multa_am  = f"multa_am_{pid_f2}"
+            key_multa_dam = f"multa_dam_{pid_f2}"
+            key_multa_ro  = f"multa_ro_{pid_f2}"
+            mc1, mc2, mc3 = st.columns(3)
+            with mc1:
+                multa_amarilla = st.number_input("💰 Multa amarilla ($)", min_value=0.0,
+                    step=0.5, key=key_multa_am, value=0.0,
+                    help="Monto que paga el jugador por 1 amarilla simple")
+            with mc2:
+                multa_dam = st.number_input("💰 Multa doble amarilla ($)", min_value=0.0,
+                    step=0.5, key=key_multa_dam, value=0.0,
+                    help="Monto que paga el jugador por doble amarilla (2 amarillas en el mismo partido)")
+            with mc3:
+                multa_roja = st.number_input("💰 Multa roja directa ($)", min_value=0.0,
+                    step=0.5, key=key_multa_ro, value=0.0,
+                    help="Monto que paga el jugador por roja directa")
+
+            # Mostrar tarjetas actuales
+            tarjetas_actuales = st.session_state[key_tarj]
+            if tarjetas_actuales:
+                st.markdown("<small style='color:#d4b8b8;'>Tarjetas registradas:</small>", unsafe_allow_html=True)
+                to_remove = []
+                for i, t in enumerate(tarjetas_actuales):
+                    tc1, tc2, tc3, tc4 = st.columns([3, 2, 1, 1])
+                    with tc1:
+                        st.markdown(f"**{t['jugador']}**")
+                    with tc2:
+                        tipo_emoji = "🟨" if t['tipo']=='amarilla' else "🟥"
+                        st.markdown(f"{tipo_emoji} {t['tipo'].capitalize()}")
+                    with tc3:
+                        st.markdown(f"min. {t['minuto']}")
+                    with tc4:
+                        if st.button("✕", key=f"rm_tarj_{i}_{pid_f2}"):
+                            to_remove.append(i)
+                for idx in reversed(to_remove):
+                    st.session_state[key_tarj].pop(idx)
+                if to_remove:
+                    st.rerun()
+
+                # Detectar y mostrar dobles amarillas
+                from collections import Counter
+                conteo_por_jugador = Counter(
+                    t['jugador'] for t in tarjetas_actuales if t['tipo']=='amarilla'
+                )
+                for jugador, cant in conteo_por_jugador.items():
+                    if cant >= 2:
+                        st.markdown(f'<div class="alerta-box">🟨🟨 <b>{jugador}</b> tiene {cant} amarillas en este partido → <b>doble amarilla</b> (1 partido suspensión)</div>',
+                                    unsafe_allow_html=True)
+
+            # Agregar nueva tarjeta
+            st.markdown("<small style='color:#d4b8b8;'>Agregar tarjeta:</small>", unsafe_allow_html=True)
+            na1, na2, na3, na4 = st.columns([3, 2, 1, 1])
+            with na1:
+                nueva_tarj_jug = st.selectbox("Jugador", nombres_f2, key=f"ntj_{pid_f2}")
+            with na2:
+                nueva_tarj_tipo = st.selectbox("Tipo", ["amarilla", "roja"], key=f"ntt_{pid_f2}")
+            with na3:
+                nueva_tarj_min = st.number_input("Min.", min_value=1, max_value=120,
+                                                 value=1, key=f"ntm_{pid_f2}")
+            with na4:
+                st.markdown("<br>", unsafe_allow_html=True)
+                if st.button("➕ Agregar", key=f"add_tarj_{pid_f2}"):
+                    st.session_state[key_tarj].append({
+                        "jugador": nueva_tarj_jug,
+                        "tipo": nueva_tarj_tipo,
+                        "minuto": nueva_tarj_min
+                    })
+                    st.rerun()
+
+            f2_notas = st.text_area("📝 Notas del partido", height=60,
+                                    value=str(p_data['notas'] or ""), key="f2_notas")
+
+            st.markdown("**📋 Comentarios del informe arbitral**")
+            st.caption("Observaciones del árbitro, incidencias, protestas, decisiones polémicas, etc.")
+            f2_arbitral = st.text_area("Informe arbitral", height=80,
+                                       value=str(p_data.get('informe_arbitral', '') or ""),
+                                       key="f2_arbitral",
+                                       placeholder="Ej: El árbitro anuló un gol por fuera de juego en el min. 67. Hubo protestas por la tarjeta roja de Santiago. El partido se detuvo 3 minutos por lluvia...")
+
+            # Vista previa de sanciones
+            tarjetas_preview = st.session_state.get(key_tarj, [])
+            if tarjetas_preview:
+                from collections import Counter
+                st.markdown("**⚠️ Sanciones que se generarán al guardar:**")
+                conteo_am = Counter(t['jugador'] for t in tarjetas_preview if t['tipo']=='amarilla')
+                for nombre, cant in conteo_am.items():
+                    if cant >= 2:
+                        st.markdown(f"&nbsp;&nbsp;🟨🟨 **{nombre}** — doble amarilla → 1 partido suspensión")
                     else:
-                        rows = jugadores[jugadores['nombre']==gol_jug]
+                        rows = jugadores[jugadores['nombre']==nombre]
                         if len(rows)>0:
-                            c.execute("INSERT INTO goles (partido_id,jugador_id,minuto,tipo) VALUES (?,?,?,?)",
-                                      (pid_f2, int(rows.iloc[0]['id']), gol_min, 'normal'))
+                            act = tarjetas_amarillas_activas(int(rows.iloc[0]['id']))
+                            if act+1 >= 5:
+                                st.markdown(f"&nbsp;&nbsp;🟨 **{nombre}** — llega a 5 amarillas → 1 partido suspensión")
+                            else:
+                                st.markdown(f"&nbsp;&nbsp;🟨 **{nombre}** — amarilla #{act+1} (sin suspensión aún)")
+                for t in tarjetas_preview:
+                    if t['tipo'] == 'roja':
+                        st.markdown(f"&nbsp;&nbsp;🟥 **{t['jugador']}** — roja directa → 2 partidos suspensión")
 
-            # Borrar tarjetas, sanciones y multas anteriores de este partido
-            c.execute("DELETE FROM tarjetas WHERE partido_id=?", (pid_f2,))
-            c.execute("DELETE FROM sanciones WHERE partido_origen_id=?", (pid_f2,))
-            c.execute("DELETE FROM multas WHERE partido_id=?", (pid_f2,))
+            if st.button("💾 GUARDAR EVENTOS", type="primary", key="btn_fase2"):
+                from collections import Counter
+                tarjetas_guardar = st.session_state.get(key_tarj, [])
+                conn = get_conn(); c = conn.cursor()
 
-            # Insertar tarjetas individuales + sanciones + multas
-            conteo_am_g = Counter(t['jugador'] for t in tarjetas_guardar if t['tipo']=='amarilla')
-            sanciones_gen = []
-            jugadores_multa_am_procesados = set()
+                # Actualizar resultado, notas e informe arbitral
+                c.execute("UPDATE partidos SET goles_favor=?,goles_contra=?,notas=?,informe_arbitral=? WHERE id=?",
+                          (f2_gf, f2_gc, f2_notas, f2_arbitral, pid_f2))
 
-            for t in tarjetas_guardar:
-                rows = jugadores[jugadores['nombre']==t['jugador']]
-                if len(rows)==0: continue
-                jid = int(rows.iloc[0]['id'])
-                c.execute("INSERT INTO tarjetas (partido_id,jugador_id,tipo,cumplida) VALUES (?,?,?,0)",
-                          (pid_f2, jid, t['tipo']))
+                # Borrar cambios anteriores y reinsertar desde Fase 2
+                c.execute("DELETE FROM cambios WHERE partido_id=?", (pid_f2,))
+                for sale_n, entra_n, min_c in cambios_data_f2:
+                    jrow_sale  = jugadores[jugadores['nombre']==sale_n]
+                    jrow_entra = jugadores[jugadores['nombre']==entra_n]
+                    if len(jrow_sale)>0 and len(jrow_entra)>0:
+                        existe = q("SELECT id FROM participaciones WHERE partido_id=? AND jugador_id=?",
+                                   (pid_f2, int(jrow_entra.iloc[0]['id'])))
+                        if len(existe)==0:
+                            c.execute("INSERT INTO participaciones (partido_id,jugador_id,rol) VALUES (?,?,?)",
+                                      (pid_f2, int(jrow_entra.iloc[0]['id']), 'cambio'))
+                        c.execute("""INSERT INTO cambios (partido_id,jugador_sale_id,jugador_entra_id,minuto)
+                                     VALUES (?,?,?,?)""",
+                                  (pid_f2, int(jrow_sale.iloc[0]['id']),
+                                   int(jrow_entra.iloc[0]['id']), min_c))
 
-                # Multas: amarilla simple, doble amarilla o roja
-                if t['tipo'] == 'amarilla' and t['jugador'] not in jugadores_multa_am_procesados:
-                    es_doble = conteo_am_g.get(t['jugador'], 0) >= 2
-                    if es_doble:
-                        monto_m = st.session_state.get(key_multa_dam, 0.0)
-                        concepto_m = f"Multa doble amarilla vs {p_data['rival']}"
-                    else:
-                        monto_m = st.session_state.get(key_multa_am, 0.0)
-                        concepto_m = f"Multa amarilla vs {p_data['rival']}"
-                    if monto_m > 0:
-                        c.execute("""INSERT INTO multas (partido_id,jugador_id,concepto,monto,monto_pagado,pagado)
-                                     VALUES (?,?,?,?,0,0)""",
-                                  (pid_f2, jid, concepto_m, monto_m))
-                    jugadores_multa_am_procesados.add(t['jugador'])
+                # Borrar goles anteriores y reinsertar
+                c.execute("DELETE FROM goles WHERE partido_id=?", (pid_f2,))
+                if f2_gf > 0:
+                    for gol_jug, gol_min in goles_nuevos:
+                        if gol_jug == "⬛ Desconocido / propia puerta":
+                            c.execute("INSERT INTO goles (partido_id,jugador_id,minuto,tipo) VALUES (?,NULL,?,?)",
+                                      (pid_f2, gol_min, 'desconocido'))
+                        else:
+                            rows = jugadores[jugadores['nombre']==gol_jug]
+                            if len(rows)>0:
+                                c.execute("INSERT INTO goles (partido_id,jugador_id,minuto,tipo) VALUES (?,?,?,?)",
+                                          (pid_f2, int(rows.iloc[0]['id']), gol_min, 'normal'))
 
-                if t['tipo'] == 'roja':
-                    monto_m = st.session_state.get(key_multa_ro, 0.0)
-                    if monto_m > 0:
-                        c.execute("""INSERT INTO multas (partido_id,jugador_id,concepto,monto,monto_pagado,pagado)
-                                     VALUES (?,?,?,?,0,0)""",
-                                  (pid_f2, jid, f"Multa roja directa vs {p_data['rival']}", monto_m))
+                # Borrar tarjetas, sanciones y multas anteriores de este partido
+                c.execute("DELETE FROM tarjetas WHERE partido_id=?", (pid_f2,))
+                c.execute("DELETE FROM sanciones WHERE partido_origen_id=?", (pid_f2,))
+                c.execute("DELETE FROM multas WHERE partido_id=?", (pid_f2,))
 
-            # Sanciones según conteo final
-            for nombre, cant in conteo_am_g.items():
-                rows = jugadores[jugadores['nombre']==nombre]
-                if len(rows)==0: continue
-                jid = int(rows.iloc[0]['id'])
-                if cant >= 2:
-                    c.execute("""INSERT INTO sanciones (jugador_id,partido_origen_id,motivo,
-                                 partidos_suspension,partidos_cumplidos) VALUES (?,?,'doble_amarilla',1,0)""",
-                              (jid, pid_f2))
-                    sanciones_gen.append(f"🟨🟨 {nombre}: 1 partido")
-                else:
-                    total_s = amarillas_simples_total(jid) + 1
-                    if total_s % 5 == 0:
-                        c.execute("""INSERT INTO sanciones (jugador_id,partido_origen_id,motivo,
-                                     partidos_suspension,partidos_cumplidos) VALUES (?,?,'acumulacion_amarillas',1,0)""",
-                                  (jid, pid_f2))
-                        sanciones_gen.append(f"🟨×5 {nombre}: 1 partido")
+                # Insertar tarjetas individuales + sanciones + multas
+                conteo_am_g = Counter(t['jugador'] for t in tarjetas_guardar if t['tipo']=='amarilla')
+                sanciones_gen = []
+                jugadores_multa_am_procesados = set()
 
-            for t in tarjetas_guardar:
-                if t['tipo'] == 'roja':
+                for t in tarjetas_guardar:
                     rows = jugadores[jugadores['nombre']==t['jugador']]
                     if len(rows)==0: continue
                     jid = int(rows.iloc[0]['id'])
-                    c.execute("""INSERT INTO sanciones (jugador_id,partido_origen_id,motivo,
-                                 partidos_suspension,partidos_cumplidos) VALUES (?,?,'roja_directa',2,0)""",
-                              (jid, pid_f2))
-                    sanciones_gen.append(f"🟥 {t['jugador']}: 2 partidos")
+                    c.execute("INSERT INTO tarjetas (partido_id,jugador_id,tipo,cumplida) VALUES (?,?,?,0)",
+                              (pid_f2, jid, t['tipo']))
 
-            conn.commit(); conn.close()
-            # Limpiar session_state de tarjetas de este partido
-            if key_tarj in st.session_state:
-                del st.session_state[key_tarj]
-            res_str = "Ganado ✅" if f2_gf>f2_gc else ("Empate 🤝" if f2_gf==f2_gc else "Perdido ❌")
-            msg = f"✅ Eventos guardados — {f2_gf}:{f2_gc} ({res_str}). {len(tarjetas_guardar)} tarjeta(s)."
-            if sanciones_gen: msg += f" Sanciones: {' | '.join(sanciones_gen)}"
-            msg += " Ve a Fase 3 para registrar los cobros."
-            st.success(msg)
-            st.rerun()
+                    # Multas: amarilla simple, doble amarilla o roja
+                    if t['tipo'] == 'amarilla' and t['jugador'] not in jugadores_multa_am_procesados:
+                        es_doble = conteo_am_g.get(t['jugador'], 0) >= 2
+                        if es_doble:
+                            monto_m = st.session_state.get(key_multa_dam, 0.0)
+                            concepto_m = f"Multa doble amarilla vs {p_data['rival']}"
+                        else:
+                            monto_m = st.session_state.get(key_multa_am, 0.0)
+                            concepto_m = f"Multa amarilla vs {p_data['rival']}"
+                        if monto_m > 0:
+                            c.execute("""INSERT INTO multas (partido_id,jugador_id,concepto,monto,monto_pagado,pagado)
+                                         VALUES (?,?,?,?,0,0)""",
+                                      (pid_f2, jid, concepto_m, monto_m))
+                        jugadores_multa_am_procesados.add(t['jugador'])
+
+                    if t['tipo'] == 'roja':
+                        monto_m = st.session_state.get(key_multa_ro, 0.0)
+                        if monto_m > 0:
+                            c.execute("""INSERT INTO multas (partido_id,jugador_id,concepto,monto,monto_pagado,pagado)
+                                         VALUES (?,?,?,?,0,0)""",
+                                      (pid_f2, jid, f"Multa roja directa vs {p_data['rival']}", monto_m))
+
+                # Sanciones según conteo final
+                for nombre, cant in conteo_am_g.items():
+                    rows = jugadores[jugadores['nombre']==nombre]
+                    if len(rows)==0: continue
+                    jid = int(rows.iloc[0]['id'])
+                    if cant >= 2:
+                        c.execute("""INSERT INTO sanciones (jugador_id,partido_origen_id,motivo,
+                                     partidos_suspension,partidos_cumplidos) VALUES (?,?,'doble_amarilla',1,0)""",
+                                  (jid, pid_f2))
+                        sanciones_gen.append(f"🟨🟨 {nombre}: 1 partido")
+                    else:
+                        total_s = amarillas_simples_total(jid) + 1
+                        if total_s % 5 == 0:
+                            c.execute("""INSERT INTO sanciones (jugador_id,partido_origen_id,motivo,
+                                         partidos_suspension,partidos_cumplidos) VALUES (?,?,'acumulacion_amarillas',1,0)""",
+                                      (jid, pid_f2))
+                            sanciones_gen.append(f"🟨×5 {nombre}: 1 partido")
+
+                for t in tarjetas_guardar:
+                    if t['tipo'] == 'roja':
+                        rows = jugadores[jugadores['nombre']==t['jugador']]
+                        if len(rows)==0: continue
+                        jid = int(rows.iloc[0]['id'])
+                        c.execute("""INSERT INTO sanciones (jugador_id,partido_origen_id,motivo,
+                                     partidos_suspension,partidos_cumplidos) VALUES (?,?,'roja_directa',2,0)""",
+                                  (jid, pid_f2))
+                        sanciones_gen.append(f"🟥 {t['jugador']}: 2 partidos")
+
+                conn.commit(); conn.close()
+                # Limpiar session_state de tarjetas de este partido
+                if key_tarj in st.session_state:
+                    del st.session_state[key_tarj]
+                res_str = "Ganado ✅" if f2_gf>f2_gc else ("Empate 🤝" if f2_gf==f2_gc else "Perdido ❌")
+                msg = f"✅ Eventos guardados — {f2_gf}:{f2_gc} ({res_str}). {len(tarjetas_guardar)} tarjeta(s)."
+                if sanciones_gen: msg += f" Sanciones: {' | '.join(sanciones_gen)}"
+                msg += " Ve a Fase 3 para registrar los cobros."
+                st.success(msg)
+                st.rerun()
 
     st.markdown("---")
 
@@ -1726,143 +1726,143 @@ if IS_ADMIN:
         else:
             pid_f3 = int(partidos_list.iloc[opciones_f3[1:].index(sel_f3)]['id'])
 
-        # ── Cuotas de arbitraje ──────────────────────────────────────────
-        pagos_df = q("""
-            SELECT pg.id, j.nombre, j.id as jugador_id,
-                   pg.monto, COALESCE(pg.monto_pagado,0) as monto_pagado, pg.pagado,
-                   COALESCE(pa.rol,'N/D') as rol
-            FROM pagos pg
-            JOIN jugadores j ON pg.jugador_id=j.id
-            LEFT JOIN participaciones pa ON pa.jugador_id=pg.jugador_id AND pa.partido_id=pg.partido_id
-            WHERE pg.partido_id=? ORDER BY pa.rol DESC, j.nombre
-        """, (pid_f3,))
+            # ── Cuotas de arbitraje ──────────────────────────────────────────
+            pagos_df = q("""
+                SELECT pg.id, j.nombre, j.id as jugador_id,
+                       pg.monto, COALESCE(pg.monto_pagado,0) as monto_pagado, pg.pagado,
+                       COALESCE(pa.rol,'N/D') as rol
+                FROM pagos pg
+                JOIN jugadores j ON pg.jugador_id=j.id
+                LEFT JOIN participaciones pa ON pa.jugador_id=pg.jugador_id AND pa.partido_id=pg.partido_id
+                WHERE pg.partido_id=? ORDER BY pa.rol DESC, j.nombre
+            """, (pid_f3,))
 
-        if len(pagos_df) > 0:
-            st.markdown("**⚽ Cuotas de arbitraje**")
-            total_cuotas   = pagos_df['monto'].sum()
-            cobrado_cuotas = pagos_df['monto_pagado'].sum()
-            pend_cuotas    = total_cuotas - cobrado_cuotas
-            cp1,cp2,cp3 = st.columns(3)
-            with cp1:
-                st.markdown(f"""<div class="metric-card"><div class="label">💰 Total cuotas partido</div>
-                    <div class="valor" style="font-size:24px;">${total_cuotas:,.2f}</div></div>""", unsafe_allow_html=True)
-            with cp2:
-                st.markdown(f"""<div class="metric-card"><div class="label">✅ Cobrado</div>
-                    <div class="valor" style="font-size:24px;color:#f0c040;">${cobrado_cuotas:,.2f}</div></div>""", unsafe_allow_html=True)
-            with cp3:
-                st.markdown(f"""<div class="metric-card"><div class="label">⏳ Pendiente partido</div>
-                    <div class="valor" style="font-size:24px;color:#ff6b6b;">${pend_cuotas:,.2f}</div></div>""", unsafe_allow_html=True)
-
-            st.markdown("<small style='color:#d4b8b8;'>💡 La columna <b>Deuda total</b> incluye este partido + partidos anteriores sin pagar. Ingresa cuánto paga ahora.</small>", unsafe_allow_html=True)
-            nuevos_pagos_cuota = {}
-            for _, row in pagos_df.iterrows():
-                deuda_partido = float(row['monto']) - float(row['monto_pagado'])
-                if bool(row['pagado']): continue
-                jid = int(row['jugador_id'])
-                # Deuda acumulada de OTROS partidos (no este)
-                deuda_otros = q("""
-                    SELECT COALESCE(SUM(monto - COALESCE(monto_pagado,0)),0) as d
-                    FROM pagos WHERE jugador_id=? AND pagado=0 AND partido_id!=?
-                """, (jid, pid_f3))['d'][0]
-                deuda_otros_multas = q("""
-                    SELECT COALESCE(SUM(monto - COALESCE(monto_pagado,0)),0) as d
-                    FROM multas WHERE jugador_id=? AND pagado=0 AND partido_id!=?
-                """, (jid, pid_f3))['d'][0]
-                deuda_acum_anterior = float(deuda_otros) + float(deuda_otros_multas)
-                deuda_total = deuda_partido + deuda_acum_anterior
-
-                rol_str = "⚽ Titular" if row['rol']=='titular' else ("🔄 Cambio" if row['rol']=='cambio' else "")
-                col_nom, col_part, col_acum, col_total, col_paga = st.columns([3, 1.5, 1.5, 1.5, 1.5])
-                with col_nom:
-                    st.markdown(f"**{row['nombre']}** <small style='color:#d4b8b8;'>{rol_str}</small>", unsafe_allow_html=True)
-                with col_part:
-                    st.markdown(f"<small style='color:#d4b8b8;'>Este partido</small><br><span style='color:#ff6b6b;font-weight:700;'>${deuda_partido:,.2f}</span>", unsafe_allow_html=True)
-                with col_acum:
-                    color_ant = "#ffaa55" if deuda_acum_anterior > 0 else "#50e080"
-                    st.markdown(f"<small style='color:#d4b8b8;'>Anterior</small><br><span style='color:{color_ant};font-weight:700;'>${deuda_acum_anterior:,.2f}</span>", unsafe_allow_html=True)
-                with col_total:
-                    st.markdown(f"<small style='color:#d4b8b8;'>Total debe</small><br><span style='color:#ff6b6b;font-weight:800;'>${deuda_total:,.2f}</span>", unsafe_allow_html=True)
-                with col_paga:
-                    paga_ahora = st.number_input("Paga $", min_value=0.0,
-                        max_value=float(deuda_partido), value=0.0, step=0.5,
-                        key=f"f3_cuota_{row['id']}", label_visibility="visible")
-                nuevos_pagos_cuota[int(row['id'])] = (float(row['monto_pagado']), float(row['monto']), paga_ahora)
-
-        # ── Multas por tarjetas ──────────────────────────────────────────
-        multas_df = q("""SELECT m.id, j.nombre, j.id as jugador_id, m.concepto, m.monto,
-                               COALESCE(m.monto_pagado,0) as monto_pagado, m.pagado
-                         FROM multas m JOIN jugadores j ON m.jugador_id=j.id
-                         WHERE m.partido_id=? AND m.pagado=0 ORDER BY j.nombre""", (pid_f3,))
-
-        nuevas_multas = {}
-        if len(multas_df) > 0:
-            st.markdown("**⚠️ Multas por tarjetas**")
-            for _, row in multas_df.iterrows():
-                deuda_m = float(row['monto']) - float(row['monto_pagado'])
-                mc_nom, mc_debe, mc_paga = st.columns([3, 2, 2])
-                with mc_nom:
-                    st.markdown(f"**{row['nombre']}** — {row['concepto']}")
-                with mc_debe:
-                    st.markdown(f"Debe: <span style='color:#ff6b6b;font-weight:700;'>${deuda_m:,.2f}</span>", unsafe_allow_html=True)
-                with mc_paga:
-                    paga_m = st.number_input("Paga ahora $", min_value=0.0,
-                        max_value=float(deuda_m), value=0.0, step=0.5,
-                        key=f"f3_multa_{row['id']}", label_visibility="visible")
-                nuevas_multas[int(row['id'])] = (float(row['monto_pagado']), float(row['monto']), paga_m)
-
-        # ── Gasto / ingreso adicional ─────────────────────────────────────
-        st.markdown("**➕ Gasto / ingreso adicional del partido**")
-        ga1, ga2 = st.columns([3, 1])
-        with ga1:
-            f3_concepto = st.text_input("Concepto", key="f3_concepto",
-                placeholder="Ej: Botellón extra, bono patrocinador…")
-        with ga2:
-            f3_monto_extra = st.number_input("Monto ($)", step=0.5, key="f3_monto_extra",
-                help="Positivo = ingreso, Negativo = gasto")
-
-        if st.button("💾 GUARDAR COBROS", type="primary", key="btn_fase3"):
-            conn = get_conn(); cambios = 0
-
-            # Cuotas con pago parcial
             if len(pagos_df) > 0:
-                for pid_p, (ya_pagado, monto_total, paga_ahora) in nuevos_pagos_cuota.items():
+                st.markdown("**⚽ Cuotas de arbitraje**")
+                total_cuotas   = pagos_df['monto'].sum()
+                cobrado_cuotas = pagos_df['monto_pagado'].sum()
+                pend_cuotas    = total_cuotas - cobrado_cuotas
+                cp1,cp2,cp3 = st.columns(3)
+                with cp1:
+                    st.markdown(f"""<div class="metric-card"><div class="label">💰 Total cuotas partido</div>
+                        <div class="valor" style="font-size:24px;">${total_cuotas:,.2f}</div></div>""", unsafe_allow_html=True)
+                with cp2:
+                    st.markdown(f"""<div class="metric-card"><div class="label">✅ Cobrado</div>
+                        <div class="valor" style="font-size:24px;color:#f0c040;">${cobrado_cuotas:,.2f}</div></div>""", unsafe_allow_html=True)
+                with cp3:
+                    st.markdown(f"""<div class="metric-card"><div class="label">⏳ Pendiente partido</div>
+                        <div class="valor" style="font-size:24px;color:#ff6b6b;">${pend_cuotas:,.2f}</div></div>""", unsafe_allow_html=True)
+
+                st.markdown("<small style='color:#d4b8b8;'>💡 La columna <b>Deuda total</b> incluye este partido + partidos anteriores sin pagar. Ingresa cuánto paga ahora.</small>", unsafe_allow_html=True)
+                nuevos_pagos_cuota = {}
+                for _, row in pagos_df.iterrows():
+                    deuda_partido = float(row['monto']) - float(row['monto_pagado'])
+                    if bool(row['pagado']): continue
+                    jid = int(row['jugador_id'])
+                    # Deuda acumulada de OTROS partidos (no este)
+                    deuda_otros = q("""
+                        SELECT COALESCE(SUM(monto - COALESCE(monto_pagado,0)),0) as d
+                        FROM pagos WHERE jugador_id=? AND pagado=0 AND partido_id!=?
+                    """, (jid, pid_f3))['d'][0]
+                    deuda_otros_multas = q("""
+                        SELECT COALESCE(SUM(monto - COALESCE(monto_pagado,0)),0) as d
+                        FROM multas WHERE jugador_id=? AND pagado=0 AND partido_id!=?
+                    """, (jid, pid_f3))['d'][0]
+                    deuda_acum_anterior = float(deuda_otros) + float(deuda_otros_multas)
+                    deuda_total = deuda_partido + deuda_acum_anterior
+
+                    rol_str = "⚽ Titular" if row['rol']=='titular' else ("🔄 Cambio" if row['rol']=='cambio' else "")
+                    col_nom, col_part, col_acum, col_total, col_paga = st.columns([3, 1.5, 1.5, 1.5, 1.5])
+                    with col_nom:
+                        st.markdown(f"**{row['nombre']}** <small style='color:#d4b8b8;'>{rol_str}</small>", unsafe_allow_html=True)
+                    with col_part:
+                        st.markdown(f"<small style='color:#d4b8b8;'>Este partido</small><br><span style='color:#ff6b6b;font-weight:700;'>${deuda_partido:,.2f}</span>", unsafe_allow_html=True)
+                    with col_acum:
+                        color_ant = "#ffaa55" if deuda_acum_anterior > 0 else "#50e080"
+                        st.markdown(f"<small style='color:#d4b8b8;'>Anterior</small><br><span style='color:{color_ant};font-weight:700;'>${deuda_acum_anterior:,.2f}</span>", unsafe_allow_html=True)
+                    with col_total:
+                        st.markdown(f"<small style='color:#d4b8b8;'>Total debe</small><br><span style='color:#ff6b6b;font-weight:800;'>${deuda_total:,.2f}</span>", unsafe_allow_html=True)
+                    with col_paga:
+                        paga_ahora = st.number_input("Paga $", min_value=0.0,
+                            max_value=float(deuda_partido), value=0.0, step=0.5,
+                            key=f"f3_cuota_{row['id']}", label_visibility="visible")
+                    nuevos_pagos_cuota[int(row['id'])] = (float(row['monto_pagado']), float(row['monto']), paga_ahora)
+
+            # ── Multas por tarjetas ──────────────────────────────────────────
+            multas_df = q("""SELECT m.id, j.nombre, j.id as jugador_id, m.concepto, m.monto,
+                                   COALESCE(m.monto_pagado,0) as monto_pagado, m.pagado
+                             FROM multas m JOIN jugadores j ON m.jugador_id=j.id
+                             WHERE m.partido_id=? AND m.pagado=0 ORDER BY j.nombre""", (pid_f3,))
+
+            nuevas_multas = {}
+            if len(multas_df) > 0:
+                st.markdown("**⚠️ Multas por tarjetas**")
+                for _, row in multas_df.iterrows():
+                    deuda_m = float(row['monto']) - float(row['monto_pagado'])
+                    mc_nom, mc_debe, mc_paga = st.columns([3, 2, 2])
+                    with mc_nom:
+                        st.markdown(f"**{row['nombre']}** — {row['concepto']}")
+                    with mc_debe:
+                        st.markdown(f"Debe: <span style='color:#ff6b6b;font-weight:700;'>${deuda_m:,.2f}</span>", unsafe_allow_html=True)
+                    with mc_paga:
+                        paga_m = st.number_input("Paga ahora $", min_value=0.0,
+                            max_value=float(deuda_m), value=0.0, step=0.5,
+                            key=f"f3_multa_{row['id']}", label_visibility="visible")
+                    nuevas_multas[int(row['id'])] = (float(row['monto_pagado']), float(row['monto']), paga_m)
+
+            # ── Gasto / ingreso adicional ─────────────────────────────────────
+            st.markdown("**➕ Gasto / ingreso adicional del partido**")
+            ga1, ga2 = st.columns([3, 1])
+            with ga1:
+                f3_concepto = st.text_input("Concepto", key="f3_concepto",
+                    placeholder="Ej: Botellón extra, bono patrocinador…")
+            with ga2:
+                f3_monto_extra = st.number_input("Monto ($)", step=0.5, key="f3_monto_extra",
+                    help="Positivo = ingreso, Negativo = gasto")
+
+            if st.button("💾 GUARDAR COBROS", type="primary", key="btn_fase3"):
+                conn = get_conn(); cambios = 0
+
+                # Cuotas con pago parcial
+                if len(pagos_df) > 0:
+                    for pid_p, (ya_pagado, monto_total, paga_ahora) in nuevos_pagos_cuota.items():
+                        if paga_ahora > 0:
+                            nuevo_total_pagado = ya_pagado + paga_ahora
+                            saldado = nuevo_total_pagado >= monto_total - 0.001
+                            conn.execute("UPDATE pagos SET monto_pagado=?, pagado=? WHERE id=?",
+                                         (nuevo_total_pagado, int(saldado), pid_p))
+                            # Registrar en caja solo el monto que paga ahora
+                            pr = q("SELECT jugador_id, partido_id FROM pagos WHERE id=?", (pid_p,)).iloc[0]
+                            jn = q("SELECT nombre FROM jugadores WHERE id=?", (int(pr['jugador_id']),)).iloc[0]['nombre']
+                            conn.execute("INSERT INTO caja (partido_id,concepto,monto,fecha) VALUES (?,?,?,?)",
+                                (pid_f3,
+                                 f"Pago {jn} — {sel_f3}" + (" (parcial)" if not saldado else ""),
+                                 paga_ahora, str(date.today())))
+                            cambios += 1
+
+                # Multas con pago parcial
+                for multa_id, (ya_pagado, monto_total, paga_ahora) in nuevas_multas.items():
                     if paga_ahora > 0:
                         nuevo_total_pagado = ya_pagado + paga_ahora
                         saldado = nuevo_total_pagado >= monto_total - 0.001
-                        conn.execute("UPDATE pagos SET monto_pagado=?, pagado=? WHERE id=?",
-                                     (nuevo_total_pagado, int(saldado), pid_p))
-                        # Registrar en caja solo el monto que paga ahora
-                        pr = q("SELECT jugador_id, partido_id FROM pagos WHERE id=?", (pid_p,)).iloc[0]
-                        jn = q("SELECT nombre FROM jugadores WHERE id=?", (int(pr['jugador_id']),)).iloc[0]['nombre']
+                        conn.execute("UPDATE multas SET monto_pagado=?, pagado=? WHERE id=?",
+                                     (nuevo_total_pagado, int(saldado), multa_id))
+                        mr = q("SELECT jugador_id, concepto FROM multas WHERE id=?", (multa_id,)).iloc[0]
+                        jn = q("SELECT nombre FROM jugadores WHERE id=?", (int(mr['jugador_id']),)).iloc[0]['nombre']
                         conn.execute("INSERT INTO caja (partido_id,concepto,monto,fecha) VALUES (?,?,?,?)",
                             (pid_f3,
-                             f"Pago {jn} — {sel_f3}" + (" (parcial)" if not saldado else ""),
+                             f"Multa {jn} — {mr['concepto']}" + (" (parcial)" if not saldado else ""),
                              paga_ahora, str(date.today())))
                         cambios += 1
 
-            # Multas con pago parcial
-            for multa_id, (ya_pagado, monto_total, paga_ahora) in nuevas_multas.items():
-                if paga_ahora > 0:
-                    nuevo_total_pagado = ya_pagado + paga_ahora
-                    saldado = nuevo_total_pagado >= monto_total - 0.001
-                    conn.execute("UPDATE multas SET monto_pagado=?, pagado=? WHERE id=?",
-                                 (nuevo_total_pagado, int(saldado), multa_id))
-                    mr = q("SELECT jugador_id, concepto FROM multas WHERE id=?", (multa_id,)).iloc[0]
-                    jn = q("SELECT nombre FROM jugadores WHERE id=?", (int(mr['jugador_id']),)).iloc[0]['nombre']
+                if f3_concepto.strip():
                     conn.execute("INSERT INTO caja (partido_id,concepto,monto,fecha) VALUES (?,?,?,?)",
-                        (pid_f3,
-                         f"Multa {jn} — {mr['concepto']}" + (" (parcial)" if not saldado else ""),
-                         paga_ahora, str(date.today())))
+                        (pid_f3, f3_concepto.strip(), f3_monto_extra, str(date.today())))
                     cambios += 1
 
-            if f3_concepto.strip():
-                conn.execute("INSERT INTO caja (partido_id,concepto,monto,fecha) VALUES (?,?,?,?)",
-                    (pid_f3, f3_concepto.strip(), f3_monto_extra, str(date.today())))
-                cambios += 1
-
-            conn.commit(); conn.close()
-            st.success(f"✅ {cambios} cobro(s) registrado(s). Los valores no pagados quedan como deuda acumulada.") if cambios else st.info("Sin cambios.")
-            if cambios: st.rerun()
+                conn.commit(); conn.close()
+                st.success(f"✅ {cambios} cobro(s) registrado(s). Los valores no pagados quedan como deuda acumulada.") if cambios else st.info("Sin cambios.")
+                if cambios: st.rerun()
 
     st.markdown("---")
 
