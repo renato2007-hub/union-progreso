@@ -771,6 +771,15 @@ with st.sidebar:
                 mime="application/octet-stream")
         except FileNotFoundError:
             st.caption("Base de datos aún no creada.")
+
+        # Botón de backup manual a GitHub
+        if st.button("☁️ Guardar en GitHub ahora"):
+            with st.spinner("Guardando..."):
+                ok = guardar_db_en_github()
+            if ok:
+                st.success("✅ Guardado en GitHub")
+            else:
+                st.error("❌ Error — revisa el token en Secrets")
         st.markdown("---")
         st.markdown("**🗑️ Borrar datos de prueba**")
         st.caption("Elimina partidos, pagos, tarjetas, goles y sanciones. Los jugadores se conservan.")
@@ -1285,6 +1294,7 @@ if IS_ADMIN:
             if nombre:
                 run("INSERT INTO jugadores (nombre, numero, posicion, exento_arbitraje, exento_uniforme) VALUES (?,?,?,?,?)",
                     (nombre, numero, posicion, int(exento_arb), int(exento_uni)))
+                guardar_db_en_github()
                 st.success(f"✅ {nombre} agregado al plantel")
                 st.rerun()
 
@@ -1314,11 +1324,13 @@ if IS_ADMIN:
                 if st.form_submit_button("💾 Guardar cambios"):
                     run("UPDATE jugadores SET nombre=?, numero=?, posicion=?, exento_arbitraje=?, exento_uniforme=? WHERE id=?",
                         (n_nombre, n_num, n_pos, int(n_exarb), int(n_exuni), int(j_sel['id'])))
+                    guardar_db_en_github()
                     st.success("✅ Jugador actualizado")
                     st.rerun()
             with col_d:
                 if st.form_submit_button("🗑️ Desactivar jugador"):
                     run("UPDATE jugadores SET activo=0 WHERE id=?", (int(j_sel['id']),))
+                    guardar_db_en_github()
                     st.warning(f"Jugador {j_sel['nombre']} desactivado")
                     st.rerun()
 
