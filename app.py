@@ -1410,24 +1410,83 @@ if IS_ADMIN:
         'arb': f1_arb, 'agua': f1_agua, 'monto': f1_monto
     }
 
-    st.markdown("**⚽ Titulares**")
-    # Limpiar session_state si tiene nombres que ya no existen en el plantel
+    st.markdown("**⚽ Titulares — selecciona por posición**")
+    st.caption("Selecciona cada jugador en su posición. Si alguien juega fuera de posición, agrégalo en 'Cualquier posición'.")
+
+    # Limpiar session_state si tiene nombres inválidos
     if 'f1_tit' in st.session_state:
         st.session_state['f1_tit'] = [n for n in st.session_state['f1_tit'] if n in nombres]
     if 'f1_draft' in st.session_state and 'titulares' in st.session_state['f1_draft']:
         st.session_state['f1_draft']['titulares'] = [n for n in st.session_state['f1_draft']['titulares'] if n in nombres]
 
-    f1_titulares = st.multiselect("Selecciona titulares (máximo 11)", nombres, key="f1_tit",
-                                   default=[n for n in draft.get('titulares', []) if n in nombres])
+    # Agrupar jugadores por posición
+    pos_grupos = {
+        "🧤 Portero":        jugadores[jugadores['posicion']=='Portero']['nombre'].tolist(),
+        "🛡️ Defensa":        jugadores[jugadores['posicion']=='Defensa']['nombre'].tolist(),
+        "⚙️ Mediocampista":  jugadores[jugadores['posicion']=='Mediocampista']['nombre'].tolist(),
+        "⚽ Delantero":      jugadores[jugadores['posicion']=='Delantero']['nombre'].tolist(),
+    }
+
+    default_tit = draft.get('titulares', [])
+    f1_titulares = []
+
+    for pos_label, pos_nombres in pos_grupos.items():
+        if not pos_nombres:
+            continue
+        default_pos = [n for n in default_tit if n in pos_nombres]
+        sel = st.multiselect(
+            pos_label,
+            pos_nombres,
+            default=default_pos,
+            key=f"f1_tit_{pos_label}"
+        )
+        f1_titulares.extend(sel)
+
+    # Jugadores fuera de posición — puede seleccionar cualquiera
+    ya_seleccionados = set(f1_titulares)
+    disponibles_extra = [n for n in nombres if n not in ya_seleccionados]
+    default_extra = [n for n in default_tit if n not in set(
+        jugadores[jugadores['posicion'].isin(['Portero','Defensa','Mediocampista','Delantero'])]['nombre'].tolist()
+    )]
+    # También incluir los que estaban seleccionados en posición alternativa
+    default_extra_validos = [n for n in default_tit if n in disponibles_extra]
+
+    sel_extra = st.multiselect(
+        "🔀 Fuera de posición / Cualquier jugador",
+        disponibles_extra,
+        default=default_extra_validos,
+        key="f1_tit_extra",
+        help="Usa esto si un jugador juega en una posición diferente a la registrada, o si no tiene posición asignada"
+    )
+    f1_titulares.extend(sel_extra)
+
+    # Quitar duplicados manteniendo orden
+    seen = set()
+    f1_titulares = [n for n in f1_titulares if not (n in seen or seen.add(n))]
     st.session_state['f1_draft']['titulares'] = f1_titulares
 
     # Validación visual del conteo
-    if len(f1_titulares) > 11:
-        st.error(f"⚠️ Tienes {len(f1_titulares)} titulares. El máximo es 11. Quita {len(f1_titulares)-11} jugador(es).")
-    elif len(f1_titulares) == 11:
-        st.success("✅ 11 titulares — alineación completa.")
-    elif len(f1_titulares) > 0:
-        st.caption(f"{len(f1_titulares)}/11 titulares seleccionados.")
+    n_tit = len(f1_titulares)
+    if n_tit > 11:
+        st.error(f"⚠️ Tienes {n_tit} titulares. El máximo es 11. Quita {n_tit-11}.")
+    elif n_tit == 11:
+        st.success(f"✅ 11 titulares — alineación completa.")
+    elif n_tit > 0:
+        st.caption(f"{n_tit}/11 titulares seleccionados.")
+
+    # Resumen visual de la alineación por posición
+    if n_tit > 0:
+        resumen_pos = {}
+        for nombre in f1_titulares:
+            row = jugadores[jugadores['nombre']==nombre]
+            pos = str(row.iloc[0]['posicion']) if len(row)>0 and row.iloc[0]['posicion'] else 'Sin pos.'
+            resumen_pos.setdefault(pos, []).append(nombre)
+        lineas = []
+        for pos, noms in resumen_pos.items():
+            lineas.append(f"<b>{pos}:</b> {', '.join(noms)}")
+        st.markdown("<div style='background:#f5f0f0;border:1px solid #d4a0a0;border-radius:8px;"
+                    "padding:10px 14px;font-size:13px;'>" +
+                    "<br>".join(lineas) + "</div>", unsafe_allow_html=True)
 
     # ── Alertas de suspensión en tiempo real ─────────────────────────────
     suspendidos_en_lista = []
@@ -1460,10 +1519,10 @@ if IS_ADMIN:
     if st.button("💾 GUARDAR ALINEACIÓN", type="primary", key="btn_fase1"):
         if not f1_rival.strip():
             st.error("⚠️ Ingresa el nombre del rival.")
-        elif len(f1_titulares) == 0:
+        elif n_tit == 0:
             st.error("⚠️ Selecciona al menos un titular.")
-        elif len(f1_titulares) > 11:
-            st.error(f"⚠️ Máximo 11 titulares. Tienes {len(f1_titulares)}, quita {len(f1_titulares)-11}.")
+        elif n_tit > 11:
+            st.error(f"⚠️ Máximo 11 titulares. Tienes {n_tit}, quita {n_tit-11}.")
         elif suspendidos_en_lista:
             nombres_susp = ", ".join([n for n, _ in suspendidos_en_lista])
             st.error(f"🚫 No puedes guardar la alineación. Jugador(es) suspendido(s): {nombres_susp}. Quítalos antes de guardar.")
@@ -1517,7 +1576,7 @@ if IS_ADMIN:
                 for k in ['sel_f2', 'sel_f3']:
                     if k in st.session_state:
                         del st.session_state[k]
-                st.success(f"✅ Alineación guardada — {len(f1_titulares)} titulares. "
+                st.success(f"✅ Alineación guardada — {n_tit} titulares. "
                            f"Fase 2 ya apunta a este partido.")
                 st.rerun()
 
