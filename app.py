@@ -1085,9 +1085,15 @@ h1, h2, h3 {
 .stButton button:hover { background: #c43048 !important; }
 
 [data-testid="stSidebar"] {
-    background: #ffffff !important;
+    background: #f0c040 !important;
     border-right: 1px solid #d4a0a0;
 }
+[data-testid="stSidebar"] * { color: #1a0808 !important; }
+[data-testid="stSidebar"] .stButton button {
+    background: #9b2335 !important;
+    color: #ffffff !important;
+}
+[data-testid="stSidebar"] .stMarkdown { color: #1a0808 !important; }
 
 div[data-testid="stWidgetLabel"] p,
 label { color: #1a0808 !important; font-weight: 600 !important; }
