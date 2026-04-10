@@ -4,6 +4,70 @@ import pandas as pd
 from datetime import datetime, date
 import json
 import io
+import base64
+import requests
+
+# ─── BACKUP / RESTORE desde GitHub ────────────────────────────────────────────
+def _gh_headers():
+    try:
+        token = st.secrets["GITHUB_TOKEN"]
+        return {"Authorization": f"token {token}",
+                "Accept": "application/vnd.github.v3+json"}
+    except Exception:
+        return None
+
+def _gh_repo():
+    try:
+        return st.secrets.get("GITHUB_REPO", "renato2007-hub/union-progreso")
+    except Exception:
+        return "renato2007-hub/union-progreso"
+
+def restaurar_db_desde_github():
+    """Al iniciar la app, descarga equipo.db desde GitHub si no existe localmente."""
+    import os
+    if os.path.exists("equipo.db") and os.path.getsize("equipo.db") > 2048:
+        return  # ya existe y no está vacía
+    headers = _gh_headers()
+    if not headers:
+        return
+    try:
+        url = f"https://api.github.com/repos/{_gh_repo()}/contents/equipo.db"
+        r = requests.get(url, headers=headers, timeout=10)
+        if r.status_code == 200:
+            content = r.json().get("content", "")
+            db_bytes = base64.b64decode(content)
+            with open("equipo.db", "wb") as f:
+                f.write(db_bytes)
+    except Exception:
+        pass  # si falla, init_db() creará la BD vacía
+
+def guardar_db_en_github():
+    """Sube equipo.db a GitHub para persistencia entre deploys."""
+    headers = _gh_headers()
+    if not headers:
+        return False
+    try:
+        with open("equipo.db", "rb") as f:
+            db_bytes = f.read()
+        content_b64 = base64.b64encode(db_bytes).decode()
+        url = f"https://api.github.com/repos/{_gh_repo()}/contents/equipo.db"
+        # Obtener SHA actual del archivo en GitHub (necesario para actualizarlo)
+        r = requests.get(url, headers=headers, timeout=10)
+        sha = r.json().get("sha", "") if r.status_code == 200 else ""
+        payload = {
+            "message": "backup automatico equipo.db",
+            "content": content_b64,
+            "branch": "main"
+        }
+        if sha:
+            payload["sha"] = sha
+        r2 = requests.put(url, headers=headers, json=payload, timeout=15)
+        return r2.status_code in (200, 201)
+    except Exception:
+        return False
+
+# Restaurar DB al inicio antes de cualquier otra cosa
+restaurar_db_desde_github()
 
 # ─── PDF GENERATOR ─────────────────────────────────────────────────────────────
 def generar_pdf_partido(pid):
@@ -1445,6 +1509,7 @@ if IS_ADMIN:
                     c.execute("INSERT INTO caja (partido_id,concepto,monto,fecha) VALUES (?,?,?,?)",
                               (pid, f"Gastos partido vs {f1_rival.strip()}", -(f1_arb+f1_agua), str(f1_fecha)))
                 conn.commit(); conn.close()
+                guardar_db_en_github()
                 # Limpiar borrador y guardar el pid del partido recién creado
                 st.session_state['f1_draft'] = {}
                 st.session_state['ultimo_pid'] = pid
@@ -1802,6 +1867,7 @@ if IS_ADMIN:
                         sanciones_gen.append(f"🟥 {t['jugador']}: 2 partidos")
 
                 conn.commit(); conn.close()
+                guardar_db_en_github()
                 # Limpiar session_state de tarjetas de este partido
                 if key_tarj in st.session_state:
                     del st.session_state[key_tarj]
@@ -2114,6 +2180,7 @@ if IS_ADMIN:
                     cambios += 1
 
                 conn.commit(); conn.close()
+                guardar_db_en_github()
                 st.success(f"✅ {cambios} cobro(s) registrado(s). Los valores no pagados quedan como deuda acumulada.") if cambios else st.info("Sin cambios.")
                 if cambios: st.rerun()
 
@@ -2453,6 +2520,7 @@ with TAB_HISTORIAL:
                                              (pid_edit, f"Gastos partido vs {e_rival.strip()}",
                                               -(e_arb+e_agua), str(e_fecha)))
                             conn.commit(); conn.close()
+                            guardar_db_en_github()
                             st.success("✅ Partido actualizado."); st.rerun()
                 with e_col2:
                     key_confirm_del = f"confirm_del_{pid_edit}"
