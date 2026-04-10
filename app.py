@@ -248,6 +248,23 @@ def generar_pdf_partido(pid):
                         FROM sanciones s JOIN jugadores j ON s.jugador_id=j.id
                         WHERE s.partido_origen_id=?""", (pid,))
 
+    # Jugadores que estaban suspendidos para ESTE partido
+    # (sancionados en partidos ANTERIORES a este, con suspension pendiente)
+    fecha_partido = str(p['fecha'])
+    suspendidos_este = q("""
+        SELECT j.nombre, s.motivo, s.partidos_suspension, s.partidos_cumplidos,
+               po.fecha as fecha_origen, po.rival as rival_origen,
+               (s.partidos_suspension - s.partidos_cumplidos) as restantes
+        FROM sanciones s
+        JOIN jugadores j ON s.jugador_id=j.id
+        JOIN partidos po ON s.partido_origen_id=po.id
+        WHERE po.fecha < ? AND s.partidos_cumplidos < s.partidos_suspension
+          AND j.id NOT IN (
+              SELECT jugador_id FROM participaciones WHERE partido_id=?
+          )
+        ORDER BY j.nombre
+    """, (fecha_partido, pid))
+
     pagos = q("""SELECT j.nombre, pg.monto, COALESCE(pg.monto_pagado,0) as pagado,
                         COALESCE(pa.rol,'N/D') as rol
                  FROM pagos pg JOIN jugadores j ON pg.jugador_id=j.id
@@ -411,6 +428,50 @@ def generar_pdf_partido(pid):
                     ('FONTNAME', (2,i), (2,i), 'Helvetica-Bold'),
                 ]))
         story.append(t_sanc)
+
+    # ── JUGADORES QUE NO PUDIERON JUGAR POR SUSPENSION ───────────────────
+    C_SUSP = colors.HexColor("#7a3010")   # naranja oscuro
+    story.append(sp(8))
+    story.append(sec_header("JUGADORES AUSENTES POR SUSPENSION", C_SUSP))
+    story.append(sp(5))
+
+    if len(suspendidos_este) > 0:
+        ml_susp = {
+            'roja_directa':          'Roja directa',
+            'doble_amarilla':        'Doble amarilla',
+            'acumulacion_amarillas': '5 amarillas acumuladas'
+        }
+        susp_data = [["JUGADOR", "MOTIVO SANCION", "ORIGEN", "ESTADO PARA PROXIMO PARTIDO"]]
+        for _, s in suspendidos_este.iterrows():
+            restantes = int(s['restantes'])
+            cumplidos = int(s['partidos_cumplidos'])
+            total     = int(s['partidos_suspension'])
+            motivo    = ml_susp.get(str(s['motivo']), str(s['motivo']))
+            origen    = f"vs {s['rival_origen']} ({s['fecha_origen']})"
+            if restantes <= 1:
+                estado = "Puede jugar el proximo partido"
+            else:
+                estado = f"Aun suspendido — faltan {restantes-1} partido(s) mas"
+            susp_data.append([str(s['nombre']), motivo, origen, estado])
+
+        t_susp = tabla(susp_data, [4*cm, 3.5*cm, 5*cm, 4.5*cm], header_color=C_SUSP)
+        # Colorear en rojo las filas que siguen suspendidos
+        for i, row in enumerate(susp_data[1:], 1):
+            if "Aun suspendido" in row[3]:
+                t_susp.setStyle(TableStyle([
+                    ('BACKGROUND', (0,i), (-1,i), colors.HexColor("#fde8e8")),
+                    ('TEXTCOLOR', (3,i), (3,i), colors.HexColor("#cc0000")),
+                    ('FONTNAME', (3,i), (3,i), 'Helvetica-Bold'),
+                ]))
+            else:
+                t_susp.setStyle(TableStyle([
+                    ('BACKGROUND', (0,i), (-1,i), colors.HexColor("#e8f5ec")),
+                    ('TEXTCOLOR', (3,i), (3,i), colors.HexColor("#007a30")),
+                    ('FONTNAME', (3,i), (3,i), 'Helvetica-Bold'),
+                ]))
+        story.append(t_susp)
+    else:
+        story.append(Paragraph("Ningún jugador estuvo ausente por suspensión en este partido.", sN))
 
     # ── COBROS DEL PARTIDO (café) ─────────────────────────────────────────
     story.append(sp(8))
