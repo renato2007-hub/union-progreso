@@ -3114,9 +3114,14 @@ with TAB_CALENDARIO:
             notas_str   = str(ev['notas']) if ev['notas'] else ""
             tipo_str    = str(ev['tipo']) if ev['tipo'] else "Liga"
             from datetime import datetime as _dt
+            DIAS_ES   = ["Lunes","Martes","Miércoles","Jueves","Viernes","Sábado","Domingo"]
+            MESES_ES  = ["enero","febrero","marzo","abril","mayo","junio",
+                         "julio","agosto","septiembre","octubre","noviembre","diciembre"]
             try:
                 fecha_obj = _dt.strptime(str(ev['fecha']), "%Y-%m-%d")
-                fecha_fmt = fecha_obj.strftime("%A %d de %B %Y").capitalize()
+                dia_semana = DIAS_ES[fecha_obj.weekday()]
+                mes        = MESES_ES[fecha_obj.month - 1]
+                fecha_fmt  = f"{dia_semana} {fecha_obj.day} de {mes} de {fecha_obj.year}"
             except Exception:
                 fecha_fmt = str(ev['fecha'])
 
