@@ -2600,6 +2600,15 @@ with TAB_HISTORIAL:
             pid_edit = int(partidos.iloc[idx_sel]['id'])
             pe = partidos[partidos['id']==pid_edit].iloc[0]
 
+            # Limpiar session_state del editor si cambió el partido seleccionado
+            if st.session_state.get('_last_pid_edit') != pid_edit:
+                for k in list(st.session_state.keys()):
+                    if any(k.startswith(p) for p in ['e_fecha_', 'e_rival_', 'e_cancha_',
+                        'e_arb_', 'e_agua_', 'e_gf_', 'e_gc_', 'e_notas_', 'e_arbitral_',
+                        'e_tit_', 'e_cam_', 'goles_edit_', 'tarj_edit_']):
+                        del st.session_state[k]
+                st.session_state['_last_pid_edit'] = pid_edit
+
             # Detectar si hay partidos duplicados (misma fecha+rival)
             dupes = partidos[
                 (partidos['fecha']==pe['fecha']) &
@@ -2618,24 +2627,24 @@ with TAB_HISTORIAL:
                 st.markdown("**📋 Datos del partido**")
                 ec1, ec2, ec3 = st.columns(3)
                 with ec1:
-                    e_fecha = st.date_input("Fecha", value=date.fromisoformat(str(pe['fecha'])), key="e_fecha")
-                    e_rival = st.text_input("Rival", value=str(pe['rival'] or ''), key="e_rival")
+                    e_fecha = st.date_input("Fecha", value=date.fromisoformat(str(pe['fecha'])), key=f"e_fecha_{pid_edit}")
+                    e_rival = st.text_input("Rival", value=str(pe['rival'] or ''), key=f"e_rival_{pid_edit}")
                 with ec2:
-                    e_cancha = st.text_input("Cancha", value=str(pe['cancha'] or ''), key="e_cancha")
+                    e_cancha = st.text_input("Cancha", value=str(pe['cancha'] or ''), key=f"e_cancha_{pid_edit}")
                     e_arb    = st.number_input("Costo árbitro ($)", min_value=0.0, step=0.5,
-                                                value=float(pe['costo_arbitraje'] or 0), key="e_arb")
+                                                value=float(pe['costo_arbitraje'] or 0), key=f"e_arb_{pid_edit}")
                     e_agua   = st.number_input("Costo botellón ($)", min_value=0.0, step=0.5,
-                                                value=float(pe['costo_agua'] or 0), key="e_agua")
+                                                value=float(pe['costo_agua'] or 0), key=f"e_agua_{pid_edit}")
                 with ec3:
                     e_gf = st.number_input("Goles a favor", min_value=0, step=1,
-                                            value=int(pe['goles_favor'] or 0), key="e_gf")
+                                            value=int(pe['goles_favor'] or 0), key=f"e_gf_{pid_edit}")
                     e_gc = st.number_input("Goles en contra", min_value=0, step=1,
-                                            value=int(pe['goles_contra'] or 0), key="e_gc")
+                                            value=int(pe['goles_contra'] or 0), key=f"e_gc_{pid_edit}")
 
-                e_notas    = st.text_area("Notas", value=str(pe['notas'] or ''), height=60, key="e_notas")
+                e_notas    = st.text_area("Notas", value=str(pe['notas'] or ''), height=60, key=f"e_notas_{pid_edit}")
                 e_arbitral = st.text_area("Comentarios arbitrales", height=70,
                                           value=str(pe.get('informe_arbitral','') or ''),
-                                          key="e_arbitral")
+                                          key=f"e_arbitral_{pid_edit}")
 
                 # ── Alineación ────────────────────────────────────────────
                 st.markdown("**⚽ Alineación**")
@@ -2644,8 +2653,8 @@ with TAB_HISTORIAL:
                                    WHERE pa.partido_id=? ORDER BY pa.rol DESC, j.nombre""", (pid_edit,))
                 tit_act = partic_edit[partic_edit['rol']=='titular']['nombre'].tolist()
                 cam_act = partic_edit[partic_edit['rol']=='cambio']['nombre'].tolist()
-                e_titulares = st.multiselect("Titulares", nombres_all, default=[n for n in tit_act if n in nombres_all], key="e_tit")
-                e_cambios   = st.multiselect("Cambios", nombres_all, default=[n for n in cam_act if n in nombres_all], key="e_cam")
+                e_titulares = st.multiselect("Titulares", nombres_all, default=[n for n in tit_act if n in nombres_all], key=f"e_tit_{pid_edit}")
+                e_cambios   = st.multiselect("Cambios", nombres_all, default=[n for n in cam_act if n in nombres_all], key=f"e_cam_{pid_edit}")
 
                 # ── Goles ─────────────────────────────────────────────────
                 st.markdown("**⚽ Goles anotados**")
@@ -2780,7 +2789,7 @@ with TAB_HISTORIAL:
                 st.markdown("---")
                 e_col1, e_col2 = st.columns(2)
                 with e_col1:
-                    if st.button("💾 Guardar todos los cambios", type="primary", key="btn_edit_partido"):
+                    if st.button("💾 Guardar todos los cambios", type="primary", key=f"btn_edit_{pid_edit}"):
                         fecha_str_edit = str(e_fecha)  # siempre YYYY-MM-DD
                         dup = q("""SELECT id FROM partidos
                                    WHERE fecha=? AND LOWER(TRIM(rival))=LOWER(TRIM(?)) AND id!=?""",
