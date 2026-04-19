@@ -750,6 +750,16 @@ def init_db():
         FOREIGN KEY(partido_id) REFERENCES partidos(id),
         FOREIGN KEY(jugador_id) REFERENCES jugadores(id)
     );
+
+    CREATE TABLE IF NOT EXISTS calendario (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        fecha TEXT NOT NULL,
+        hora TEXT DEFAULT '',
+        rival TEXT NOT NULL,
+        estadio TEXT DEFAULT '',
+        notas TEXT DEFAULT '',
+        tipo TEXT DEFAULT 'Liga'
+    );
     """)
     # Migraciones seguras — agregan columnas si no existen
     migraciones = [
@@ -1206,21 +1216,23 @@ st.markdown("""
 
 # ─── TABS (según rol) ──────────────────────────────────────────────────────────
 if IS_ADMIN:
-    tabs = st.tabs(["🏠 INICIO", "👥 JUGADORES", "⚽ PARTIDO", "💰 FINANZAS", "🟨 DISCIPLINA", "📊 HISTORIAL"])
+    tabs = st.tabs(["🏠 INICIO", "👥 JUGADORES", "⚽ PARTIDO", "💰 FINANZAS", "🟨 DISCIPLINA", "📊 HISTORIAL", "📅 CALENDARIO"])
     TAB_INICIO    = tabs[0]
     TAB_JUGADORES = tabs[1]
     TAB_PARTIDO   = tabs[2]
     TAB_FINANZAS  = tabs[3]
     TAB_DISCIPLINA= tabs[4]
     TAB_HISTORIAL = tabs[5]
+    TAB_CALENDARIO= tabs[6]
 else:
-    tabs_j = st.tabs(["🏠 INICIO", "🟨 DISCIPLINA", "📊 HISTORIAL"])
+    tabs_j = st.tabs(["🏠 INICIO", "🟨 DISCIPLINA", "📊 HISTORIAL", "📅 CALENDARIO"])
     TAB_INICIO    = tabs_j[0]
     TAB_JUGADORES = None
     TAB_PARTIDO   = None
     TAB_FINANZAS  = None
     TAB_DISCIPLINA= tabs_j[1]
     TAB_HISTORIAL = tabs_j[2]
+    TAB_CALENDARIO= tabs_j[3]
 
 # ══════════════════════════════════════════════════════════════════════════════
 # TAB 1 — INICIO
@@ -3078,3 +3090,114 @@ with TAB_HISTORIAL:
                             mime="application/pdf",
                             key=f"pdf_{pid}"
                         )
+
+# ══════════════════════════════════════════════════════════════════════════════
+# TAB — CALENDARIO
+# ══════════════════════════════════════════════════════════════════════════════
+with TAB_CALENDARIO:
+    st.markdown('<div class="section-header">📅 CALENDARIO DE PARTIDOS</div>', unsafe_allow_html=True)
+
+    # Próximos partidos
+    proximos = q("""SELECT * FROM calendario
+                    WHERE fecha >= date('now')
+                    ORDER BY fecha ASC, hora ASC""")
+
+    if len(proximos) == 0:
+        st.markdown('<div class="ok-box">📅 No hay partidos programados próximamente.</div>',
+                    unsafe_allow_html=True)
+    else:
+        st.markdown(f"<p style='color:#7a3030;font-size:13px;'>{len(proximos)} partido(s) próximo(s) programado(s)</p>",
+                    unsafe_allow_html=True)
+        for _, ev in proximos.iterrows():
+            hora_str    = str(ev['hora']) if ev['hora'] else "Hora por confirmar"
+            estadio_str = str(ev['estadio']) if ev['estadio'] else "Estadio por confirmar"
+            notas_str   = str(ev['notas']) if ev['notas'] else ""
+            tipo_str    = str(ev['tipo']) if ev['tipo'] else "Liga"
+            from datetime import datetime as _dt
+            try:
+                fecha_obj = _dt.strptime(str(ev['fecha']), "%Y-%m-%d")
+                fecha_fmt = fecha_obj.strftime("%A %d de %B %Y").capitalize()
+            except Exception:
+                fecha_fmt = str(ev['fecha'])
+
+            badge_color = "#9b2335" if tipo_str=="Liga" else ("#1a5c8a" if tipo_str=="Copa" else "#4a7a30")
+            st.markdown(f"""
+            <div style="background:#ffffff;border:1px solid #d4a0a0;border-left:6px solid {badge_color};
+                        border-radius:10px;padding:16px 20px;margin-bottom:12px;">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+                    <span style="font-family:'Bebas Neue',sans-serif;font-size:22px;color:{badge_color};letter-spacing:1px;">
+                        vs {ev['rival']}
+                    </span>
+                    <span style="background:{badge_color};color:#ffffff;font-size:11px;font-weight:700;
+                                 padding:3px 10px;border-radius:20px;">{tipo_str}</span>
+                </div>
+                <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;font-size:13px;color:#555555;">
+                    <div>📅 <b style="color:#1a0808;">{fecha_fmt}</b></div>
+                    <div>🕐 <b style="color:#1a0808;">{hora_str}</b></div>
+                    <div>🏟️ <b style="color:#1a0808;">{estadio_str}</b></div>
+                </div>
+                {'<div style="margin-top:8px;font-size:12px;color:#7a3030;">📝 ' + notas_str + '</div>' if notas_str else ''}
+            </div>
+            """, unsafe_allow_html=True)
+
+    # Historial de partidos pasados del calendario
+    pasados = q("""SELECT * FROM calendario
+                   WHERE fecha < date('now')
+                   ORDER BY fecha DESC LIMIT 10""")
+    if len(pasados) > 0:
+        with st.expander(f"📋 Partidos anteriores del calendario ({len(pasados)})"):
+            for _, ev in pasados.iterrows():
+                st.markdown(f"- {ev['fecha']} — vs **{ev['rival']}** | {ev['estadio'] or 'Sin estadio'} | {ev['hora'] or ''}")
+
+    # Admin: agregar y gestionar partidos
+    if IS_ADMIN:
+        st.markdown("---")
+        st.markdown('<div class="section-header">➕ PROGRAMAR PARTIDO</div>', unsafe_allow_html=True)
+
+        with st.form("form_calendario"):
+            cc1, cc2, cc3 = st.columns(3)
+            with cc1:
+                cal_fecha = st.date_input("📅 Fecha", value=date.today(), key="cal_fecha")
+                cal_rival = st.text_input("⚔️ Rival", placeholder="Ej: Deportivo Norte", key="cal_rival")
+            with cc2:
+                cal_hora    = st.text_input("🕐 Hora", placeholder="Ej: 10:00 AM", key="cal_hora")
+                cal_estadio = st.text_input("🏟️ Estadio / Cancha", placeholder="Ej: Cancha Barrio Centro", key="cal_estadio")
+            with cc3:
+                cal_tipo  = st.selectbox("🏆 Tipo", ["Liga", "Copa", "Amistoso", "Otro"], key="cal_tipo")
+                cal_notas = st.text_input("📝 Notas", placeholder="Ej: Llevar uniforme completo", key="cal_notas")
+
+            if st.form_submit_button("📅 Agregar al calendario", type="primary"):
+                if cal_rival.strip():
+                    run("""INSERT INTO calendario (fecha,hora,rival,estadio,tipo,notas)
+                           VALUES (?,?,?,?,?,?)""",
+                        (str(cal_fecha), cal_hora.strip(), cal_rival.strip(),
+                         cal_estadio.strip(), cal_tipo, cal_notas.strip()))
+                    guardar_db_en_github()
+                    st.success(f"✅ Partido vs {cal_rival.strip()} agregado al calendario.")
+                    st.rerun()
+                else:
+                    st.error("⚠️ El nombre del rival es obligatorio.")
+
+        # Eliminar partido del calendario
+        if len(proximos) > 0:
+            st.markdown("**🗑️ Eliminar partido del calendario**")
+            opciones_cal = [f"{r['fecha']} vs {r['rival']} ({r['hora'] or 'sin hora'})" for _, r in proximos.iterrows()]
+            sel_cal = st.selectbox("Selecciona el partido a eliminar", opciones_cal, key="sel_cal_del")
+            idx_cal = opciones_cal.index(sel_cal)
+            pid_cal = int(proximos.iloc[idx_cal]['id'])
+            key_del_cal = f"del_cal_{pid_cal}"
+            if st.session_state.get(key_del_cal):
+                st.warning(f"¿Eliminar **{sel_cal}** del calendario?")
+                dc1, dc2 = st.columns(2)
+                with dc1:
+                    if st.button("✅ Sí, eliminar", type="primary", key=f"del_cal_yes_{pid_cal}"):
+                        run("DELETE FROM calendario WHERE id=?", (pid_cal,))
+                        guardar_db_en_github()
+                        st.session_state.pop(key_del_cal, None)
+                        st.success("✅ Eliminado del calendario."); st.rerun()
+                with dc2:
+                    if st.button("❌ Cancelar", key=f"del_cal_no_{pid_cal}"):
+                        st.session_state.pop(key_del_cal, None); st.rerun()
+            else:
+                if st.button("🗑️ Eliminar partido seleccionado", key=f"del_cal_btn_{pid_cal}"):
+                    st.session_state[key_del_cal] = True; st.rerun()
