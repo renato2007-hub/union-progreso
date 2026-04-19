@@ -2719,6 +2719,52 @@ with TAB_HISTORIAL:
                     tarj_edit_list.append({"nombre": nombres_all[0] if nombres_all else "", "tipo": "amarilla"})
                     st.rerun()
 
+                # ── Cobros ────────────────────────────────────────────────
+                st.markdown("**💰 Cobros — cuotas de arbitraje**")
+                pagos_edit = q("""SELECT pg.id, j.nombre, pg.monto,
+                                         COALESCE(pg.monto_pagado,0) as monto_pagado, pg.pagado
+                                  FROM pagos pg JOIN jugadores j ON pg.jugador_id=j.id
+                                  WHERE pg.partido_id=? ORDER BY j.nombre""", (pid_edit,))
+
+                if len(pagos_edit) > 0:
+                    for _, pg in pagos_edit.iterrows():
+                        pc1, pc2, pc3 = st.columns([3, 2, 2])
+                        with pc1:
+                            st.markdown(f"**{pg['nombre']}**", unsafe_allow_html=True)
+                        with pc2:
+                            nuevo_monto = st.number_input("Cuota ($)", min_value=0.0, step=0.5,
+                                value=float(pg['monto']), key=f"ep_monto_{pid_edit}_{pg['id']}")
+                        with pc3:
+                            nuevo_pagado = st.number_input("Pagado ($)", min_value=0.0,
+                                max_value=float(nuevo_monto) if nuevo_monto > 0 else 9999.0,
+                                step=0.5, value=float(pg['monto_pagado']),
+                                key=f"ep_pago_{pid_edit}_{pg['id']}")
+                else:
+                    st.caption("No hay cuotas registradas para este partido.")
+
+                # ── Multas ────────────────────────────────────────────────
+                st.markdown("**⚠️ Multas por tarjetas**")
+                multas_edit = q("""SELECT m.id, j.nombre, m.concepto, m.monto,
+                                          COALESCE(m.monto_pagado,0) as monto_pagado
+                                   FROM multas m JOIN jugadores j ON m.jugador_id=j.id
+                                   WHERE m.partido_id=? ORDER BY j.nombre""", (pid_edit,))
+
+                if len(multas_edit) > 0:
+                    for _, m in multas_edit.iterrows():
+                        mc1, mc2, mc3 = st.columns([3, 2, 2])
+                        with mc1:
+                            st.markdown(f"**{m['nombre']}** — {m['concepto']}")
+                        with mc2:
+                            nuevo_monto_m = st.number_input("Multa ($)", min_value=0.0, step=0.5,
+                                value=float(m['monto']), key=f"em_monto_{pid_edit}_{m['id']}")
+                        with mc3:
+                            nuevo_pago_m = st.number_input("Pagado ($)", min_value=0.0,
+                                max_value=float(nuevo_monto_m) if nuevo_monto_m > 0 else 9999.0,
+                                step=0.5, value=float(m['monto_pagado']),
+                                key=f"em_pago_{pid_edit}_{m['id']}")
+                else:
+                    st.caption("No hay multas registradas para este partido.")
+
                 # ── Botones guardar / eliminar ─────────────────────────────
                 st.markdown("---")
                 e_col1, e_col2 = st.columns(2)
@@ -2774,6 +2820,20 @@ with TAB_HISTORIAL:
                                 conn.execute("INSERT INTO caja (partido_id,concepto,monto,fecha) VALUES (?,?,?,?)",
                                              (pid_edit, f"Gastos partido vs {e_rival.strip()}",
                                               -(e_arb+e_agua), str(e_fecha)))
+                            # Actualizar cobros (pagos)
+                            for _, pg in pagos_edit.iterrows():
+                                nm = st.session_state.get(f"ep_monto_{pid_edit}_{pg['id']}", float(pg['monto']))
+                                np = st.session_state.get(f"ep_pago_{pid_edit}_{pg['id']}", float(pg['monto_pagado']))
+                                saldado = np >= nm - 0.001
+                                conn.execute("UPDATE pagos SET monto=?, monto_pagado=?, pagado=? WHERE id=?",
+                                             (nm, np, int(saldado), int(pg['id'])))
+                            # Actualizar multas
+                            for _, m in multas_edit.iterrows():
+                                nm = st.session_state.get(f"em_monto_{pid_edit}_{m['id']}", float(m['monto']))
+                                np = st.session_state.get(f"em_pago_{pid_edit}_{m['id']}", float(m['monto_pagado']))
+                                saldado = np >= nm - 0.001
+                                conn.execute("UPDATE multas SET monto=?, monto_pagado=?, pagado=? WHERE id=?",
+                                             (nm, np, int(saldado), int(m['id'])))
                             conn.commit(); conn.close()
                             # Limpiar session_state del editor
                             for k in [key_goles_edit, key_tarj_edit]:
