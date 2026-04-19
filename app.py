@@ -2770,18 +2770,19 @@ with TAB_HISTORIAL:
                 e_col1, e_col2 = st.columns(2)
                 with e_col1:
                     if st.button("💾 Guardar todos los cambios", type="primary", key="btn_edit_partido"):
+                        fecha_str_edit = str(e_fecha)  # siempre YYYY-MM-DD
                         dup = q("""SELECT id FROM partidos
-                                   WHERE fecha=? AND LOWER(rival)=LOWER(?) AND id!=?""",
-                                (str(e_fecha), e_rival.strip(), pid_edit))
+                                   WHERE fecha=? AND LOWER(TRIM(rival))=LOWER(TRIM(?)) AND id!=?""",
+                                (fecha_str_edit, e_rival.strip(), pid_edit))
                         if len(dup) > 0:
-                            st.error(f"⚠️ Ya existe otro partido el {e_fecha} contra '{e_rival.strip()}'.")
+                            st.error(f"⚠️ Ya existe otro partido el {fecha_str_edit} contra '{e_rival.strip()}' (ID diferente al que editas).")
                         else:
                             conn = get_conn()
                             # Datos básicos
                             conn.execute("""UPDATE partidos SET fecha=?,rival=?,cancha=?,goles_favor=?,
                                            goles_contra=?,costo_arbitraje=?,costo_agua=?,notas=?,informe_arbitral=?
                                            WHERE id=?""",
-                                         (str(e_fecha), e_rival.strip(), e_cancha,
+                                         (fecha_str_edit, e_rival.strip(), e_cancha,
                                           e_gf, e_gc, e_arb, e_agua, e_notas, e_arbitral, pid_edit))
                             # Participaciones
                             conn.execute("DELETE FROM participaciones WHERE partido_id=?", (pid_edit,))
