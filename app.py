@@ -3109,7 +3109,7 @@ with TAB_CALENDARIO:
         st.markdown(f"<p style='color:#7a3030;font-size:13px;'>{len(proximos)} partido(s) próximo(s) programado(s)</p>",
                     unsafe_allow_html=True)
         for _, ev in proximos.iterrows():
-            hora_str    = str(ev['hora']) if ev['hora'] else "Hora por confirmar"
+            hora_str    = str(ev['hora']) if ev['hora'] and str(ev['hora']).strip() not in ('', 'Por confirmar') else "Por confirmar"
             estadio_str = str(ev['estadio']) if ev['estadio'] else "Estadio por confirmar"
             notas_str   = str(ev['notas']) if ev['notas'] else ""
             tipo_str    = str(ev['tipo']) if ev['tipo'] else "Liga"
@@ -3160,7 +3160,18 @@ with TAB_CALENDARIO:
                 cal_fecha = st.date_input("📅 Fecha", value=date.today(), key="cal_fecha")
                 cal_rival = st.text_input("⚔️ Rival", placeholder="Ej: Deportivo Norte", key="cal_rival")
             with cc2:
-                cal_hora    = st.text_input("🕐 Hora", placeholder="Ej: 10:00 AM", key="cal_hora")
+                # Selector de hora con opciones comunes de fútbol
+                horas_opciones = [
+                    "Por confirmar",
+                    "07:00 AM", "07:30 AM", "08:00 AM", "08:30 AM",
+                    "09:00 AM", "09:30 AM", "10:00 AM", "10:30 AM",
+                    "11:00 AM", "11:30 AM", "12:00 PM", "12:30 PM",
+                    "01:00 PM", "01:30 PM", "02:00 PM", "02:30 PM",
+                    "03:00 PM", "03:30 PM", "04:00 PM", "04:30 PM",
+                    "05:00 PM", "05:30 PM", "06:00 PM", "06:30 PM",
+                    "07:00 PM", "07:30 PM", "08:00 PM",
+                ]
+                cal_hora    = st.selectbox("🕐 Hora del partido", horas_opciones, key="cal_hora")
                 cal_estadio = st.text_input("🏟️ Estadio / Cancha", placeholder="Ej: Cancha Barrio Centro", key="cal_estadio")
             with cc3:
                 cal_tipo  = st.selectbox("🏆 Tipo", ["Liga", "Copa", "Amistoso", "Otro"], key="cal_tipo")
