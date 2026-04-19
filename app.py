@@ -1408,7 +1408,7 @@ if IS_ADMIN:
  with TAB_PARTIDO:
 
     MOTIVO_LABELS = {
-        'roja_directa':         '🟥 Roja directa (2 partidos)',
+        'roja_directa':         '🟥 Roja directa',
         'doble_amarilla':       '🟨🟨 Doble amarilla (1 partido)',
         'acumulacion_amarillas':'🟨×5 Acumulación (1 partido)'
     }
@@ -1778,7 +1778,8 @@ if IS_ADMIN:
             key_multa_am  = f"multa_am_{pid_f2}"
             key_multa_dam = f"multa_dam_{pid_f2}"
             key_multa_ro  = f"multa_ro_{pid_f2}"
-            mc1, mc2, mc3 = st.columns(3)
+            key_partidos_ro = f"partidos_ro_{pid_f2}"
+            mc1, mc2, mc3, mc4 = st.columns(4)
             with mc1:
                 multa_amarilla = st.number_input("💰 Multa amarilla ($)", min_value=0.0,
                     step=0.5, key=key_multa_am, value=0.0,
@@ -1786,11 +1787,15 @@ if IS_ADMIN:
             with mc2:
                 multa_dam = st.number_input("💰 Multa doble amarilla ($)", min_value=0.0,
                     step=0.5, key=key_multa_dam, value=0.0,
-                    help="Monto que paga el jugador por doble amarilla (2 amarillas en el mismo partido)")
+                    help="Monto que paga el jugador por doble amarilla")
             with mc3:
                 multa_roja = st.number_input("💰 Multa roja directa ($)", min_value=0.0,
                     step=0.5, key=key_multa_ro, value=0.0,
                     help="Monto que paga el jugador por roja directa")
+            with mc4:
+                partidos_roja = st.number_input("🚫 Partidos suspensión roja", min_value=1, max_value=10,
+                    step=1, value=st.session_state.get(key_partidos_ro, 2), key=key_partidos_ro,
+                    help="Por defecto 2. Aumenta si la falta fue grave (reincidente, agresión, etc.)")
 
             # Mostrar tarjetas actuales
             tarjetas_actuales = st.session_state[key_tarj]
@@ -1876,7 +1881,8 @@ if IS_ADMIN:
                                 st.markdown(f"&nbsp;&nbsp;🟨 **{nombre}** — amarilla #{act+1} (sin suspensión aún)")
                 for t in tarjetas_preview:
                     if t['tipo'] == 'roja':
-                        st.markdown(f"&nbsp;&nbsp;🟥 **{t['jugador']}** — roja directa → 2 partidos suspensión")
+                        n_part_ro = st.session_state.get(key_partidos_ro, 2)
+                        st.markdown(f"&nbsp;&nbsp;🟥 **{t['jugador']}** — roja directa → **{n_part_ro} partido(s)** suspensión")
 
             if st.button("💾 GUARDAR EVENTOS", type="primary", key="btn_fase2"):
                 from collections import Counter
@@ -1999,10 +2005,11 @@ if IS_ADMIN:
                         rows = jugadores[jugadores['nombre']==t['jugador']]
                         if len(rows)==0: continue
                         jid = int(rows.iloc[0]['id'])
+                        n_part_ro = st.session_state.get(key_partidos_ro, 2)
                         c.execute("""INSERT INTO sanciones (jugador_id,partido_origen_id,motivo,
-                                     partidos_suspension,partidos_cumplidos) VALUES (?,?,'roja_directa',2,0)""",
-                                  (jid, pid_f2))
-                        sanciones_gen.append(f"🟥 {t['jugador']}: 2 partidos")
+                                     partidos_suspension,partidos_cumplidos) VALUES (?,?,'roja_directa',?,0)""",
+                                  (jid, pid_f2, int(n_part_ro)))
+                        sanciones_gen.append(f"🟥 {t['jugador']}: {int(n_part_ro)} partido(s)")
 
                 conn.commit(); conn.close()
                 guardar_db_en_github()
@@ -2354,8 +2361,11 @@ if IS_ADMIN:
                 cumplidos = int(s['partidos_cumplidos'])
                 total_s   = int(s['partidos_suspension'])
                 progreso  = f"{cumplidos}/{total_s} partidos cumplidos"
+                motivo_str = MOTIVO_LABELS.get(s['motivo'], s['motivo'])
+                if s['motivo'] == 'roja_directa':
+                    motivo_str = f"🟥 Roja directa ({total_s} partido(s))"
                 st.markdown(
-                    f'<div class="peligro-box">🚫 <b>{s["nombre"]}</b> — {MOTIVO_LABELS.get(s["motivo"],s["motivo"])}<br>'
+                    f'<div class="peligro-box">🚫 <b>{s["nombre"]}</b> — {motivo_str}<br>'
                     f'<small>Origen: partido vs <b>{s["rival"]}</b> ({s["fecha"]})<br>'
                     f'Progreso: {progreso} — Faltan <b>{restantes} partido(s)</b> más por cumplir</small></div>',
                     unsafe_allow_html=True)
