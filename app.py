@@ -2594,10 +2594,21 @@ with TAB_HISTORIAL:
             st.markdown('<div class="section-header">✏️ EDITAR PARTIDO</div>', unsafe_allow_html=True)
             st.caption("Selecciona un partido para corregir cualquier dato.")
 
-            opciones_edit = [f"{r['fecha']} vs {r['rival']}" for _, r in partidos.iterrows()]
+            opciones_edit = [f"{r['fecha']} vs {r['rival']} (#{int(r['id'])})" for _, r in partidos.iterrows()]
             sel_edit = st.selectbox("Partido a editar", opciones_edit, key="sel_edit")
-            pid_edit = int(partidos.iloc[opciones_edit.index(sel_edit)]['id'])
+            idx_sel = opciones_edit.index(sel_edit)
+            pid_edit = int(partidos.iloc[idx_sel]['id'])
             pe = partidos[partidos['id']==pid_edit].iloc[0]
+
+            # Detectar si hay partidos duplicados (misma fecha+rival)
+            dupes = partidos[
+                (partidos['fecha']==pe['fecha']) &
+                (partidos['rival'].str.lower()==str(pe['rival']).lower()) &
+                (partidos['id']!=pid_edit)
+            ]
+            if len(dupes) > 0:
+                st.warning(f"⚠️ Hay {len(dupes)} partido(s) duplicado(s) con la misma fecha y rival. "
+                           f"Elimina el que no tenga datos (ID #{int(dupes.iloc[0]['id'])}) antes de editar.")
 
             with st.expander("✏️ Abrir editor", expanded=False):
                 jugadores_all = get_jugadores()
