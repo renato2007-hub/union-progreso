@@ -2603,6 +2603,8 @@ with TAB_HISTORIAL:
                 jugadores_all = get_jugadores()
                 nombres_all = jugadores_all['nombre'].tolist()
 
+                # ── Datos básicos ─────────────────────────────────────────
+                st.markdown("**📋 Datos del partido**")
                 ec1, ec2, ec3 = st.columns(3)
                 with ec1:
                     e_fecha = st.date_input("Fecha", value=date.fromisoformat(str(pe['fecha'])), key="e_fecha")
@@ -2624,20 +2626,104 @@ with TAB_HISTORIAL:
                                           value=str(pe.get('informe_arbitral','') or ''),
                                           key="e_arbitral")
 
+                # ── Alineación ────────────────────────────────────────────
+                st.markdown("**⚽ Alineación**")
                 partic_edit = q("""SELECT j.nombre, pa.rol FROM participaciones pa
                                    JOIN jugadores j ON pa.jugador_id=j.id
                                    WHERE pa.partido_id=? ORDER BY pa.rol DESC, j.nombre""", (pid_edit,))
                 tit_act = partic_edit[partic_edit['rol']=='titular']['nombre'].tolist()
                 cam_act = partic_edit[partic_edit['rol']=='cambio']['nombre'].tolist()
-
-                st.markdown("**Titulares**")
                 e_titulares = st.multiselect("Titulares", nombres_all, default=[n for n in tit_act if n in nombres_all], key="e_tit")
-                st.markdown("**Jugadores al cambio**")
                 e_cambios   = st.multiselect("Cambios", nombres_all, default=[n for n in cam_act if n in nombres_all], key="e_cam")
 
+                # ── Goles ─────────────────────────────────────────────────
+                st.markdown("**⚽ Goles anotados**")
+                goles_act = q("""SELECT g.id, COALESCE(j.nombre,'Desconocido') as nombre,
+                                        g.minuto, g.tipo, g.jugador_id
+                                 FROM goles g LEFT JOIN jugadores j ON g.jugador_id=j.id
+                                 WHERE g.partido_id=? ORDER BY g.minuto""", (pid_edit,))
+                nombres_con_desc = nombres_all + ["Desconocido / propia puerta"]
+
+                # Mostrar goles existentes con opción de eliminar
+                key_goles_edit = f"goles_edit_{pid_edit}"
+                if key_goles_edit not in st.session_state:
+                    st.session_state[key_goles_edit] = [
+                        {"nombre": row['nombre'], "minuto": int(row['minuto'] or 1),
+                         "tipo": str(row['tipo'])}
+                        for _, row in goles_act.iterrows()
+                    ]
+
+                goles_edit_list = st.session_state[key_goles_edit]
+                to_del_g = []
+                for gi, g in enumerate(goles_edit_list):
+                    gc1, gc2, gc3, gc4 = st.columns([3, 1, 1, 0.5])
+                    with gc1:
+                        idx_j = nombres_con_desc.index(g['nombre']) if g['nombre'] in nombres_con_desc else 0
+                        goles_edit_list[gi]['nombre'] = st.selectbox("Jugador", nombres_con_desc,
+                            index=idx_j, key=f"eg_jug_{pid_edit}_{gi}")
+                    with gc2:
+                        goles_edit_list[gi]['minuto'] = st.number_input("Min.", min_value=1, max_value=120,
+                            value=g['minuto'], key=f"eg_min_{pid_edit}_{gi}")
+                    with gc3:
+                        tipos = ['normal', 'desconocido']
+                        idx_t = tipos.index(g['tipo']) if g['tipo'] in tipos else 0
+                        goles_edit_list[gi]['tipo'] = st.selectbox("Tipo", tipos,
+                            index=idx_t, key=f"eg_tip_{pid_edit}_{gi}")
+                    with gc4:
+                        st.markdown("<br>", unsafe_allow_html=True)
+                        if st.button("❌", key=f"eg_del_{pid_edit}_{gi}"):
+                            to_del_g.append(gi)
+                for gi in reversed(to_del_g):
+                    goles_edit_list.pop(gi)
+                if to_del_g: st.rerun()
+
+                if st.button("➕ Agregar gol", key=f"eg_add_{pid_edit}"):
+                    goles_edit_list.append({"nombre": nombres_all[0] if nombres_all else "Desconocido", "minuto": 1, "tipo": "normal"})
+                    st.rerun()
+
+                # ── Tarjetas ──────────────────────────────────────────────
+                st.markdown("**🟨 Tarjetas**")
+                tarj_act = q("""SELECT t.id, j.nombre, t.tipo
+                                FROM tarjetas t JOIN jugadores j ON t.jugador_id=j.id
+                                WHERE t.partido_id=? ORDER BY t.tipo, j.nombre""", (pid_edit,))
+
+                key_tarj_edit = f"tarj_edit_{pid_edit}"
+                if key_tarj_edit not in st.session_state:
+                    st.session_state[key_tarj_edit] = [
+                        {"nombre": row['nombre'], "tipo": str(row['tipo'])}
+                        for _, row in tarj_act.iterrows()
+                    ]
+
+                tarj_edit_list = st.session_state[key_tarj_edit]
+                to_del_t = []
+                for ti, t in enumerate(tarj_edit_list):
+                    tc1, tc2, tc3 = st.columns([3, 2, 0.5])
+                    with tc1:
+                        idx_j = nombres_all.index(t['nombre']) if t['nombre'] in nombres_all else 0
+                        tarj_edit_list[ti]['nombre'] = st.selectbox("Jugador", nombres_all,
+                            index=idx_j, key=f"et_jug_{pid_edit}_{ti}")
+                    with tc2:
+                        tipos_t = ['amarilla', 'roja']
+                        idx_t = tipos_t.index(t['tipo']) if t['tipo'] in tipos_t else 0
+                        tarj_edit_list[ti]['tipo'] = st.selectbox("Tarjeta", tipos_t,
+                            index=idx_t, key=f"et_tip_{pid_edit}_{ti}")
+                    with tc3:
+                        st.markdown("<br>", unsafe_allow_html=True)
+                        if st.button("❌", key=f"et_del_{pid_edit}_{ti}"):
+                            to_del_t.append(ti)
+                for ti in reversed(to_del_t):
+                    tarj_edit_list.pop(ti)
+                if to_del_t: st.rerun()
+
+                if st.button("➕ Agregar tarjeta", key=f"et_add_{pid_edit}"):
+                    tarj_edit_list.append({"nombre": nombres_all[0] if nombres_all else "", "tipo": "amarilla"})
+                    st.rerun()
+
+                # ── Botones guardar / eliminar ─────────────────────────────
+                st.markdown("---")
                 e_col1, e_col2 = st.columns(2)
                 with e_col1:
-                    if st.button("💾 Guardar cambios del partido", type="primary", key="btn_edit_partido"):
+                    if st.button("💾 Guardar todos los cambios", type="primary", key="btn_edit_partido"):
                         dup = q("""SELECT id FROM partidos
                                    WHERE fecha=? AND LOWER(rival)=LOWER(?) AND id!=?""",
                                 (str(e_fecha), e_rival.strip(), pid_edit))
@@ -2645,11 +2731,13 @@ with TAB_HISTORIAL:
                             st.error(f"⚠️ Ya existe otro partido el {e_fecha} contra '{e_rival.strip()}'.")
                         else:
                             conn = get_conn()
+                            # Datos básicos
                             conn.execute("""UPDATE partidos SET fecha=?,rival=?,cancha=?,goles_favor=?,
                                            goles_contra=?,costo_arbitraje=?,costo_agua=?,notas=?,informe_arbitral=?
                                            WHERE id=?""",
                                          (str(e_fecha), e_rival.strip(), e_cancha,
                                           e_gf, e_gc, e_arb, e_agua, e_notas, e_arbitral, pid_edit))
+                            # Participaciones
                             conn.execute("DELETE FROM participaciones WHERE partido_id=?", (pid_edit,))
                             for nombre in e_titulares:
                                 rows = jugadores_all[jugadores_all['nombre']==nombre]
@@ -2661,6 +2749,25 @@ with TAB_HISTORIAL:
                                 if len(rows)>0:
                                     conn.execute("INSERT INTO participaciones (partido_id,jugador_id,rol) VALUES (?,?,?)",
                                                  (pid_edit, int(rows.iloc[0]['id']), 'cambio'))
+                            # Goles
+                            conn.execute("DELETE FROM goles WHERE partido_id=?", (pid_edit,))
+                            for g in st.session_state.get(key_goles_edit, []):
+                                if g['nombre'] == "Desconocido / propia puerta":
+                                    conn.execute("INSERT INTO goles (partido_id,jugador_id,minuto,tipo) VALUES (?,NULL,?,?)",
+                                                 (pid_edit, g['minuto'], 'desconocido'))
+                                else:
+                                    rows = jugadores_all[jugadores_all['nombre']==g['nombre']]
+                                    if len(rows)>0:
+                                        conn.execute("INSERT INTO goles (partido_id,jugador_id,minuto,tipo) VALUES (?,?,?,?)",
+                                                     (pid_edit, int(rows.iloc[0]['id']), g['minuto'], g['tipo']))
+                            # Tarjetas
+                            conn.execute("DELETE FROM tarjetas WHERE partido_id=?", (pid_edit,))
+                            for t in st.session_state.get(key_tarj_edit, []):
+                                rows = jugadores_all[jugadores_all['nombre']==t['nombre']]
+                                if len(rows)>0:
+                                    conn.execute("INSERT INTO tarjetas (partido_id,jugador_id,tipo,cumplida) VALUES (?,?,?,0)",
+                                                 (pid_edit, int(rows.iloc[0]['id']), t['tipo']))
+                            # Caja gastos
                             conn.execute("DELETE FROM caja WHERE partido_id=? AND concepto LIKE 'Gastos partido%'",
                                          (pid_edit,))
                             if e_arb + e_agua > 0:
@@ -2668,8 +2775,11 @@ with TAB_HISTORIAL:
                                              (pid_edit, f"Gastos partido vs {e_rival.strip()}",
                                               -(e_arb+e_agua), str(e_fecha)))
                             conn.commit(); conn.close()
+                            # Limpiar session_state del editor
+                            for k in [key_goles_edit, key_tarj_edit]:
+                                st.session_state.pop(k, None)
                             guardar_db_en_github()
-                            st.success("✅ Partido actualizado."); st.rerun()
+                            st.success("✅ Partido actualizado completamente."); st.rerun()
                 with e_col2:
                     key_confirm_del = f"confirm_del_{pid_edit}"
                     if st.session_state.get(key_confirm_del):
