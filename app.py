@@ -2621,9 +2621,9 @@ with TAB_HISTORIAL:
                 cam_act = partic_edit[partic_edit['rol']=='cambio']['nombre'].tolist()
 
                 st.markdown("**Titulares**")
-                e_titulares = st.multiselect("Titulares", nombres_all, default=tit_act, key="e_tit")
+                e_titulares = st.multiselect("Titulares", nombres_all, default=[n for n in tit_act if n in nombres_all], key="e_tit")
                 st.markdown("**Jugadores al cambio**")
-                e_cambios   = st.multiselect("Cambios", nombres_all, default=cam_act, key="e_cam")
+                e_cambios   = st.multiselect("Cambios", nombres_all, default=[n for n in cam_act if n in nombres_all], key="e_cam")
 
                 e_col1, e_col2 = st.columns(2)
                 with e_col1:
