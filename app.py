@@ -276,9 +276,11 @@ def generar_pdf_partido(pid):
                     FROM multas m JOIN jugadores j ON m.jugador_id=j.id
                     WHERE m.partido_id=? ORDER BY j.nombre""", (pid,))
 
-    # Movimientos de caja de este partido
+    # Movimientos de caja de este partido — deduplicar por concepto+monto
     caja_p = q("""SELECT concepto, monto FROM caja
-                  WHERE partido_id=? ORDER BY monto DESC""", (pid,))
+                  WHERE partido_id=?
+                  GROUP BY concepto, monto
+                  ORDER BY monto DESC""", (pid,))
     ingresos_caja = float(caja_p[caja_p['monto']>0]['monto'].sum()) if len(caja_p)>0 else 0.0
     egresos_caja  = float(abs(caja_p[caja_p['monto']<0]['monto'].sum())) if len(caja_p)>0 else 0.0
     saldo_caja_p  = ingresos_caja - egresos_caja
@@ -1501,59 +1503,21 @@ if IS_ADMIN:
         'arb': f1_arb, 'agua': f1_agua, 'monto': f1_monto
     }
 
-    st.markdown("**⚽ Titulares — selecciona por posición**")
-    st.caption("Selecciona cada jugador en su posición. Si alguien juega fuera de posición, agrégalo en 'Cualquier posición'.")
+    st.markdown("**⚽ Titulares**")
 
     # Limpiar session_state si tiene nombres inválidos
-    if 'f1_tit' in st.session_state:
-        st.session_state['f1_tit'] = [n for n in st.session_state['f1_tit'] if n in nombres]
     if 'f1_draft' in st.session_state and 'titulares' in st.session_state['f1_draft']:
         st.session_state['f1_draft']['titulares'] = [n for n in st.session_state['f1_draft']['titulares'] if n in nombres]
 
-    # Agrupar jugadores por posición
-    pos_grupos = {
-        "🧤 Portero":        jugadores[jugadores['posicion']=='Portero']['nombre'].tolist(),
-        "🛡️ Defensa":        jugadores[jugadores['posicion']=='Defensa']['nombre'].tolist(),
-        "⚙️ Mediocampista":  jugadores[jugadores['posicion']=='Mediocampista']['nombre'].tolist(),
-        "⚽ Delantero":      jugadores[jugadores['posicion']=='Delantero']['nombre'].tolist(),
-    }
+    default_tit = [n for n in draft.get('titulares', []) if n in nombres]
 
-    default_tit = draft.get('titulares', [])
-    f1_titulares = []
-
-    for pos_label, pos_nombres in pos_grupos.items():
-        if not pos_nombres:
-            continue
-        default_pos = [n for n in default_tit if n in pos_nombres]
-        sel = st.multiselect(
-            pos_label,
-            pos_nombres,
-            default=default_pos,
-            key=f"f1_tit_{pos_label}"
-        )
-        f1_titulares.extend(sel)
-
-    # Jugadores fuera de posición — puede seleccionar cualquiera
-    ya_seleccionados = set(f1_titulares)
-    disponibles_extra = [n for n in nombres if n not in ya_seleccionados]
-    default_extra = [n for n in default_tit if n not in set(
-        jugadores[jugadores['posicion'].isin(['Portero','Defensa','Mediocampista','Delantero'])]['nombre'].tolist()
-    )]
-    # También incluir los que estaban seleccionados en posición alternativa
-    default_extra_validos = [n for n in default_tit if n in disponibles_extra]
-
-    sel_extra = st.multiselect(
-        "🔀 Fuera de posición / Cualquier jugador",
-        disponibles_extra,
-        default=default_extra_validos,
-        key="f1_tit_extra",
-        help="Usa esto si un jugador juega en una posición diferente a la registrada, o si no tiene posición asignada"
+    f1_titulares = st.multiselect(
+        "Selecciona los 11 titulares (cualquier jugador en cualquier posición)",
+        nombres,
+        default=default_tit,
+        key="f1_tit_libre"
     )
-    f1_titulares.extend(sel_extra)
 
-    # Quitar duplicados manteniendo orden
-    seen = set()
-    f1_titulares = [n for n in f1_titulares if not (n in seen or seen.add(n))]
     st.session_state['f1_draft']['titulares'] = f1_titulares
 
     # Validación visual del conteo
@@ -1565,7 +1529,7 @@ if IS_ADMIN:
     elif n_tit > 0:
         st.caption(f"{n_tit}/11 titulares seleccionados.")
 
-    # Resumen visual de la alineación por posición
+    # Resumen visual de la alineación
     if n_tit > 0:
         resumen_pos = {}
         for nombre in f1_titulares:
@@ -1955,6 +1919,7 @@ if IS_ADMIN:
                 conteo_am_g = Counter(t['jugador'] for t in tarjetas_guardar if t['tipo']=='amarilla')
                 sanciones_gen = []
                 jugadores_multa_am_procesados = set()
+                jugadores_multa_ro_procesados = set()
 
                 for t in tarjetas_guardar:
                     rows = jugadores[jugadores['nombre']==t['jugador']]
@@ -1963,36 +1928,36 @@ if IS_ADMIN:
                     c.execute("INSERT INTO tarjetas (partido_id,jugador_id,tipo,cumplida) VALUES (?,?,?,0)",
                               (pid_f2, jid, t['tipo']))
 
-                    # Multas: amarilla simple, doble amarilla o roja
+                    # ── Multa AMARILLA: el club la paga al árbitro ese día → gasto inmediato
                     if t['tipo'] == 'amarilla' and t['jugador'] not in jugadores_multa_am_procesados:
                         es_doble = conteo_am_g.get(t['jugador'], 0) >= 2
                         if es_doble:
-                            monto_m = st.session_state.get(key_multa_dam, 0.0)
+                            monto_m    = st.session_state.get(key_multa_dam, 0.0)
                             concepto_m = f"Multa doble amarilla vs {p_data['rival']}"
                         else:
-                            monto_m = st.session_state.get(key_multa_am, 0.0)
+                            monto_m    = st.session_state.get(key_multa_am, 0.0)
                             concepto_m = f"Multa amarilla vs {p_data['rival']}"
                         if monto_m > 0:
                             c.execute("""INSERT INTO multas (partido_id,jugador_id,concepto,monto,monto_pagado,pagado)
                                          VALUES (?,?,?,?,0,0)""",
                                       (pid_f2, jid, concepto_m, monto_m))
-                            # Registrar gasto en caja (el club paga la multa al árbitro)
-                            nombre_j = t['jugador']
+                            # Gasto: el club pagó la multa al árbitro en el partido
                             c.execute("INSERT INTO caja (partido_id,concepto,monto,fecha) VALUES (?,?,?,?)",
-                                      (pid_f2, f"Gasto multa {nombre_j} ({concepto_m})", -monto_m, str(date.today())))
+                                      (pid_f2, f"Gasto multa {t['jugador']} ({concepto_m})",
+                                       -monto_m, str(date.today())))
                         jugadores_multa_am_procesados.add(t['jugador'])
 
-                    if t['tipo'] == 'roja':
+                    # ── Multa ROJA: NO se paga al árbitro ese día, el jugador la paga
+                    #    cuando cumple su sanción → solo se registra la deuda, sin gasto de caja
+                    if t['tipo'] == 'roja' and t['jugador'] not in jugadores_multa_ro_procesados:
                         monto_m = st.session_state.get(key_multa_ro, 0.0)
                         if monto_m > 0:
                             concepto_ro = f"Multa roja directa vs {p_data['rival']}"
                             c.execute("""INSERT INTO multas (partido_id,jugador_id,concepto,monto,monto_pagado,pagado)
                                          VALUES (?,?,?,?,0,0)""",
                                       (pid_f2, jid, concepto_ro, monto_m))
-                            # Registrar gasto en caja
-                            nombre_j = t['jugador']
-                            c.execute("INSERT INTO caja (partido_id,concepto,monto,fecha) VALUES (?,?,?,?)",
-                                      (pid_f2, f"Gasto multa {nombre_j} ({concepto_ro})", -monto_m, str(date.today())))
+                            # NO hay gasto de caja — la multa la paga el jugador al cumplir sanción
+                        jugadores_multa_ro_procesados.add(t['jugador'])
 
                 # Sanciones según conteo final
                 for nombre, cant in conteo_am_g.items():
