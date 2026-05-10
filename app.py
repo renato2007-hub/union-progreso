@@ -1503,45 +1503,58 @@ if IS_ADMIN:
         'arb': f1_arb, 'agua': f1_agua, 'monto': f1_monto
     }
 
-    st.markdown("**⚽ Titulares**")
+    st.markdown("**⚽ Titulares — arma tu alineación**")
+    st.caption("Elige quién juega en cada línea. Puedes poner a cualquier jugador donde necesites.")
 
-    # Limpiar session_state si tiene nombres inválidos
     if 'f1_draft' in st.session_state and 'titulares' in st.session_state['f1_draft']:
         st.session_state['f1_draft']['titulares'] = [n for n in st.session_state['f1_draft']['titulares'] if n in nombres]
 
     default_tit = [n for n in draft.get('titulares', []) if n in nombres]
 
-    f1_titulares = st.multiselect(
-        "Selecciona los 11 titulares (cualquier jugador en cualquier posición)",
-        nombres,
-        default=default_tit,
-        key="f1_tit_libre"
-    )
+    # Selectores por línea — cualquier jugador en cualquier línea
+    lineas = [
+        ("🧤 Arquero(s)",     "f1_arq"),
+        ("🛡️ Defensa(s)",     "f1_def"),
+        ("⚙️ Volante(s)",     "f1_vol"),
+        ("⚽ Delantero(s)",   "f1_del"),
+    ]
 
+    f1_titulares = []
+    ya_sel = set()
+
+    for label, key in lineas:
+        # Opciones: todos los jugadores no seleccionados aún + los que ya están en esta línea
+        default_linea = st.session_state.get(key + "_val", [])
+        default_linea = [n for n in default_linea if n in nombres]
+        disponibles   = [n for n in nombres if n not in ya_sel or n in default_linea]
+        sel = st.multiselect(label, disponibles, default=default_linea, key=key)
+        st.session_state[key + "_val"] = sel
+        f1_titulares.extend(sel)
+        ya_sel.update(sel)
+
+    # Quitar duplicados
+    seen = set(); f1_titulares = [n for n in f1_titulares if not (n in seen or seen.add(n))]
     st.session_state['f1_draft']['titulares'] = f1_titulares
 
-    # Validación visual del conteo
+    # Validación
     n_tit = len(f1_titulares)
     if n_tit > 11:
-        st.error(f"⚠️ Tienes {n_tit} titulares. El máximo es 11. Quita {n_tit-11}.")
+        st.error(f"⚠️ Tienes {n_tit} jugadores. El máximo es 11. Quita {n_tit-11}.")
     elif n_tit == 11:
-        st.success(f"✅ 11 titulares — alineación completa.")
+        st.success("✅ 11 titulares — alineación completa.")
     elif n_tit > 0:
-        st.caption(f"{n_tit}/11 titulares seleccionados.")
+        st.caption(f"{n_tit}/11 jugadores seleccionados.")
 
-    # Resumen visual de la alineación
+    # Resumen
     if n_tit > 0:
-        resumen_pos = {}
-        for nombre in f1_titulares:
-            row = jugadores[jugadores['nombre']==nombre]
-            pos = str(row.iloc[0]['posicion']) if len(row)>0 and row.iloc[0]['posicion'] else 'Sin pos.'
-            resumen_pos.setdefault(pos, []).append(nombre)
-        lineas = []
-        for pos, noms in resumen_pos.items():
-            lineas.append(f"<b>{pos}:</b> {', '.join(noms)}")
+        partes = []
+        for label, key in lineas:
+            sel = st.session_state.get(key + "_val", [])
+            if sel:
+                partes.append(f"<b>{label}:</b> {', '.join(sel)}")
         st.markdown("<div style='background:#f5f0f0;border:1px solid #d4a0a0;border-radius:8px;"
-                    "padding:10px 14px;font-size:13px;'>" +
-                    "<br>".join(lineas) + "</div>", unsafe_allow_html=True)
+                    "padding:10px 14px;font-size:13px;line-height:1.8;'>" +
+                    "<br>".join(partes) + "</div>", unsafe_allow_html=True)
 
     # ── Alertas de suspensión en tiempo real ─────────────────────────────
     suspendidos_en_lista = []
