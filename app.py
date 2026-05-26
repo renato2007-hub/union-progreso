@@ -25,7 +25,7 @@ def get_conn():
     if not url:
         st.error("❌ No se encontró SUPABASE_DB_URL en Secrets.")
         st.stop()
-    conn = psycopg2.connect(url, cursor_factory=psycopg2.extras.RealDictCursor)
+    conn = psycopg2.connect(url)
     return conn
 
 # ─── PDF GENERATOR ─────────────────────────────────────────────────────────────
@@ -833,14 +833,14 @@ def q(sql, params=()):
     conn = get_conn()
     sql_pg = sql.replace("?", "%s")
     try:
-        cur = conn.cursor()
+        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
         cur.execute(sql_pg, params if params else ())
         rows = cur.fetchall()
         col_names = [desc[0] for desc in cur.description] if cur.description else []
         conn.close()
         if not rows:
             return pd.DataFrame(columns=col_names)
-        df = pd.DataFrame(rows, columns=col_names)
+        df = pd.DataFrame([dict(r) for r in rows])
         # Convert Decimal to float
         for col in df.columns:
             df[col] = df[col].apply(
@@ -1576,7 +1576,12 @@ if IS_ADMIN:
                              costo_arbitraje,costo_agua,notas) VALUES (%s,%s,%s,0,0,%s,%s,%s)
                              RETURNING id""",
                           (str(f1_fecha), f1_rival.strip(), f1_cancha, f1_arb, f1_agua, ""))
-                pid = c.fetchone()['id']
+                row = c.fetchone()
+                pid = int(row[0]) if row else None
+                if not pid:
+                    st.error("❌ Error al crear el partido. Intenta de nuevo.")
+                    conn.close()
+                    st.stop()
                 # Titulares
                 for nombre in f1_titulares:
                     jrow = jugadores[jugadores['nombre']==nombre].iloc[0]
