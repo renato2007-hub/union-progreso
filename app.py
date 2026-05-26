@@ -217,7 +217,7 @@ def generar_pdf_partido(pid):
         FROM sanciones s
         JOIN jugadores j ON s.jugador_id=j.id
         JOIN partidos po ON s.partido_origen_id=po.id
-        WHERE po.fecha < ? AND s.partidos_cumplidos < s.partidos_suspension
+        WHERE po.fecha < %s AND s.partidos_cumplidos < s.partidos_suspension
           AND j.id NOT IN (
               SELECT jugador_id FROM participaciones WHERE partido_id=?
           )
@@ -3045,7 +3045,7 @@ with TAB_CALENDARIO:
 
     # Próximos partidos
     proximos = q("""SELECT * FROM calendario
-                    WHERE fecha >= CURRENT_DATE
+                    WHERE fecha >= CURRENT_DATE::text
                     ORDER BY fecha ASC, hora ASC""")
 
     if len(proximos) == 0:
@@ -3093,7 +3093,7 @@ with TAB_CALENDARIO:
 
     # Historial de partidos pasados del calendario
     pasados = q("""SELECT * FROM calendario
-                   WHERE fecha < CURRENT_DATE
+                   WHERE fecha < CURRENT_DATE::text
                    ORDER BY fecha DESC LIMIT 10""")
     if len(pasados) > 0:
         with st.expander(f"📋 Partidos anteriores del calendario ({len(pasados)})"):
