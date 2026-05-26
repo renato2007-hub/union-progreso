@@ -1573,9 +1573,10 @@ if IS_ADMIN:
             else:
                 conn = get_conn(); c = conn.cursor()
                 c.execute("""INSERT INTO partidos (fecha,rival,cancha,goles_favor,goles_contra,
-                             costo_arbitraje,costo_agua,notas) VALUES (%s,%s,%s,0,0,%s,%s,%s)""",
+                             costo_arbitraje,costo_agua,notas) VALUES (%s,%s,%s,0,0,%s,%s,%s)
+                             RETURNING id""",
                           (str(f1_fecha), f1_rival.strip(), f1_cancha, f1_arb, f1_agua, ""))
-                pid = c.lastrowid
+                pid = c.fetchone()['id']
                 # Titulares
                 for nombre in f1_titulares:
                     jrow = jugadores[jugadores['nombre']==nombre].iloc[0]
