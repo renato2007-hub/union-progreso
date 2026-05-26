@@ -1,73 +1,32 @@
 import streamlit as st
-import sqlite3
 import pandas as pd
 from datetime import datetime, date
 import json
 import io
 import base64
 import requests
+import psycopg2
+import psycopg2.extras
 
-# ─── BACKUP / RESTORE desde GitHub ────────────────────────────────────────────
-def _gh_headers():
+# ─── SUPABASE / POSTGRESQL CONNECTION ─────────────────────────────────────────
+def guardar_db_en_github():
+    """Stub — ya no se usa con Supabase."""
+    return True
+
+@st.cache_resource
+def get_db_url():
     try:
-        token = st.secrets["GITHUB_TOKEN"]
-        return {"Authorization": f"token {token}",
-                "Accept": "application/vnd.github.v3+json"}
+        return st.secrets["SUPABASE_DB_URL"]
     except Exception:
         return None
 
-def _gh_repo():
-    try:
-        return st.secrets.get("GITHUB_REPO", "renato2007-hub/union-progreso")
-    except Exception:
-        return "renato2007-hub/union-progreso"
-
-def restaurar_db_desde_github():
-    """Al iniciar la app, descarga equipo.db desde GitHub si no existe localmente."""
-    import os
-    if os.path.exists("equipo.db") and os.path.getsize("equipo.db") > 2048:
-        return  # ya existe y no está vacía
-    headers = _gh_headers()
-    if not headers:
-        return
-    try:
-        url = f"https://api.github.com/repos/{_gh_repo()}/contents/equipo.db"
-        r = requests.get(url, headers=headers, timeout=10)
-        if r.status_code == 200:
-            content = r.json().get("content", "")
-            db_bytes = base64.b64decode(content)
-            with open("equipo.db", "wb") as f:
-                f.write(db_bytes)
-    except Exception:
-        pass  # si falla, init_db() creará la BD vacía
-
-def guardar_db_en_github():
-    """Sube equipo.db a GitHub para persistencia entre deploys."""
-    headers = _gh_headers()
-    if not headers:
-        return False
-    try:
-        with open("equipo.db", "rb") as f:
-            db_bytes = f.read()
-        content_b64 = base64.b64encode(db_bytes).decode()
-        url = f"https://api.github.com/repos/{_gh_repo()}/contents/equipo.db"
-        # Obtener SHA actual del archivo en GitHub (necesario para actualizarlo)
-        r = requests.get(url, headers=headers, timeout=10)
-        sha = r.json().get("sha", "") if r.status_code == 200 else ""
-        payload = {
-            "message": "backup automatico equipo.db",
-            "content": content_b64,
-            "branch": "main"
-        }
-        if sha:
-            payload["sha"] = sha
-        r2 = requests.put(url, headers=headers, json=payload, timeout=15)
-        return r2.status_code in (200, 201)
-    except Exception:
-        return False
-
-# Restaurar DB al inicio antes de cualquier otra cosa
-restaurar_db_desde_github()
+def get_conn():
+    url = get_db_url()
+    if not url:
+        st.error("❌ No se encontró SUPABASE_DB_URL en Secrets.")
+        st.stop()
+    conn = psycopg2.connect(url, cursor_factory=psycopg2.extras.RealDictCursor)
+    return conn
 
 # ─── PDF GENERATOR ─────────────────────────────────────────────────────────────
 def generar_pdf_partido(pid):
@@ -641,12 +600,15 @@ def generar_pdf_partido(pid):
     return buf.getvalue()
 
 # ─── DATABASE ──────────────────────────────────────────────────────────────────
-def get_conn():
-    conn = sqlite3.connect("equipo.db", check_same_thread=False)
-    conn.row_factory = sqlite3.Row
-    return conn
-
 def init_db():
+    """Tables already created in Supabase. Just verify connection."""
+    try:
+        conn = get_conn()
+        conn.close()
+    except Exception as e:
+        pass
+
+def _init_db_old():
     conn = get_conn()
     c = conn.cursor()
     c.executescript("""
@@ -771,7 +733,7 @@ def init_db():
     ]
     for sql in migraciones:
         try:
-            conn.execute(sql)
+            conn.cursor().execute(sql)
         except Exception:
             pass  # columna ya existe
     conn.commit()
@@ -835,24 +797,7 @@ with st.sidebar:
     if IS_ADMIN:
         st.markdown("---")
         st.markdown("**⚙️ Administración**")
-        try:
-            with open("equipo.db", "rb") as f_db:
-                db_bytes = f_db.read()
-            from datetime import date as _date
-            st.download_button("💾 Descargar respaldo DB", data=db_bytes,
-                file_name=f"equipo_backup_{_date.today()}.db",
-                mime="application/octet-stream")
-        except FileNotFoundError:
-            st.caption("Base de datos aún no creada.")
-
-        # Botón de backup manual a GitHub
-        if st.button("☁️ Guardar en GitHub ahora"):
-            with st.spinner("Guardando..."):
-                ok = guardar_db_en_github()
-            if ok:
-                st.success("✅ Guardado en GitHub")
-            else:
-                st.error("❌ Error — revisa el token en Secrets")
+        st.markdown("<small style='color:#7a3030;'>✅ Datos guardados en Supabase</small>", unsafe_allow_html=True)
         st.markdown("---")
         st.markdown("**🗑️ Borrar datos de prueba**")
         st.caption("Elimina partidos, pagos, tarjetas, goles y sanciones. Los jugadores se conservan.")
@@ -863,10 +808,9 @@ with st.sidebar:
             with col_si:
                 if st.button("✅ Sí, borrar", type="primary"):
                     _conn = get_conn()
+                    _cur = _conn.cursor()
                     for _tbl in ["goles","cambios","multas","tarjetas","sanciones","pagos","participaciones","caja","partidos"]:
-                        _conn.execute(f"DELETE FROM {_tbl}")
-                    try: _conn.execute("DELETE FROM sqlite_sequence WHERE name != 'jugadores'")
-                    except Exception: pass
+                        _cur.execute(f"DELETE FROM {_tbl}")
                     _conn.commit(); _conn.close()
                     keys_keep = {"usuario", "rol"}
                     for k in list(st.session_state.keys()):
@@ -884,14 +828,27 @@ with st.sidebar:
 
 # ─── HELPERS ───────────────────────────────────────────────────────────────────
 def q(sql, params=()):
+    """Execute SELECT query, return DataFrame. Converts ? to %s for PostgreSQL."""
     conn = get_conn()
-    df = pd.read_sql_query(sql, conn, params=params)
-    conn.close()
-    return df
+    sql_pg = sql.replace("?", "%s")
+    # Fix SQLite-specific functions for PostgreSQL
+    sql_pg = sql_pg.replace("CURRENT_DATE", "CURRENT_DATE")
+    sql_pg = sql_pg.replace("CURRENT_DATE", "CURRENT_DATE")
+    try:
+        df = pd.read_sql_query(sql_pg, conn, params=params if params else None)
+        conn.close()
+        return df
+    except Exception as e:
+        conn.close()
+        raise e
 
 def run(sql, params=()):
+    """Execute INSERT/UPDATE/DELETE. Converts ? to %s for PostgreSQL."""
     conn = get_conn()
-    conn.execute(sql, params)
+    sql_pg = sql.replace("?", "%s")
+    sql_pg = sql_pg.replace("CURRENT_DATE", "CURRENT_DATE")
+    cur = conn.cursor()
+    cur.execute(sql_pg, params if params else ())
     conn.commit()
     conn.close()
 
@@ -981,12 +938,12 @@ def eliminar_partido_completo(pid):
     #    deben quedar pendientes de nuevo
     pagos_del_partido = q("SELECT id, jugador_id, monto FROM pagos WHERE partido_id=?", (pid,))
     for _, pg in pagos_del_partido.iterrows():
-        conn.execute("UPDATE pagos SET monto_pagado=0, pagado=0 WHERE id=?", (int(pg['id']),))
+        conn.cursor().execute("UPDATE pagos SET monto_pagado=0, pagado=0 WHERE id=%s", (int(pg['id']),))
 
     # 3. Restaurar multas pagadas de este partido
     multas_del_partido = q("SELECT id FROM multas WHERE partido_id=?", (pid,))
     for _, m in multas_del_partido.iterrows():
-        conn.execute("UPDATE multas SET monto_pagado=0, pagado=0 WHERE id=?", (int(m['id']),))
+        conn.cursor().execute("UPDATE multas SET monto_pagado=0, pagado=0 WHERE id=%s", (int(m['id']),))
 
     # 4. Eliminar todos los registros del partido
     for tbl, col in [
@@ -999,9 +956,9 @@ def eliminar_partido_completo(pid):
         ('multas',           'partido_id'),
         ('sanciones',        'partido_origen_id'),
     ]:
-        conn.execute(f"DELETE FROM {tbl} WHERE {col}=?", (pid,))
+        conn.cursor().execute(f"DELETE FROM {tbl} WHERE {col}=%s", (pid,))
 
-    conn.execute("DELETE FROM partidos WHERE id=?", (pid,))
+    conn.cursor().execute("DELETE FROM partidos WHERE id=%s", (pid,))
     conn.commit()
     conn.close()
 
@@ -1611,14 +1568,14 @@ if IS_ADMIN:
                 # Titulares
                 for nombre in f1_titulares:
                     jrow = jugadores[jugadores['nombre']==nombre].iloc[0]
-                    c.execute("INSERT INTO participaciones (partido_id,jugador_id,rol) VALUES (?,?,?)",
+                    c.execute("INSERT INTO participaciones (partido_id,jugador_id,rol) VALUES (%s,%s,%s)",
                               (pid, int(jrow['id']), 'titular'))
                 # Cambios: registrar participación del que entra y guardar el cambio
                 for sale, entra, min_c in cambios_data:
                     jrow_entra = jugadores[jugadores['nombre']==entra]
                     jrow_sale  = jugadores[jugadores['nombre']==sale]
                     if len(jrow_entra)>0:
-                        c.execute("INSERT INTO participaciones (partido_id,jugador_id,rol) VALUES (?,?,?)",
+                        c.execute("INSERT INTO participaciones (partido_id,jugador_id,rol) VALUES (%s,%s,%s)",
                                   (pid, int(jrow_entra.iloc[0]['id']), 'cambio'))
                     if len(jrow_entra)>0 and len(jrow_sale)>0:
                         c.execute("""INSERT INTO cambios (partido_id,jugador_sale_id,jugador_entra_id,minuto)
@@ -1630,10 +1587,10 @@ if IS_ADMIN:
                 for nombre in participantes:
                     jrow = jugadores[jugadores['nombre']==nombre].iloc[0]
                     if not bool(jrow['exento_arbitraje']) and f1_monto > 0:
-                        c.execute("INSERT INTO pagos (partido_id,jugador_id,monto,pagado) VALUES (?,?,?,0)",
+                        c.execute("INSERT INTO pagos (partido_id,jugador_id,monto,pagado) VALUES (%s,%s,%s,0)",
                                   (pid, int(jrow['id']), f1_monto))
                 if f1_arb + f1_agua > 0:
-                    c.execute("INSERT INTO caja (partido_id,concepto,monto,fecha) VALUES (?,?,?,?)",
+                    c.execute("INSERT INTO caja (partido_id,concepto,monto,fecha) VALUES (%s,%s,%s,%s)",
                               (pid, f"Gastos partido vs {f1_rival.strip()}", -(f1_arb+f1_agua), str(f1_fecha)))
                 conn.commit(); conn.close()
                 guardar_db_en_github()
@@ -1879,11 +1836,11 @@ if IS_ADMIN:
                 conn = get_conn(); c = conn.cursor()
 
                 # Actualizar resultado, notas e informe arbitral
-                c.execute("UPDATE partidos SET goles_favor=?,goles_contra=?,notas=?,informe_arbitral=? WHERE id=?",
+                c.execute("UPDATE partidos SET goles_favor=%s,goles_contra=%s,notas=%s,informe_arbitral=%s WHERE id=%s",
                           (f2_gf, f2_gc, f2_notas, f2_arbitral, pid_f2))
 
                 # Borrar cambios anteriores y reinsertar desde Fase 2
-                c.execute("DELETE FROM cambios WHERE partido_id=?", (pid_f2,))
+                c.execute("DELETE FROM cambios WHERE partido_id=%s", (pid_f2,))
                 # Obtener cuota ORIGINAL del partido (monto máximo registrado = cuota completa)
                 p_cuota = q("""SELECT MAX(pg.monto) as monto FROM pagos pg
                                WHERE pg.partido_id=?""", (pid_f2,))
@@ -1897,36 +1854,36 @@ if IS_ADMIN:
                         existe_partic = q("SELECT id FROM participaciones WHERE partido_id=? AND jugador_id=?",
                                    (pid_f2, jid_entra))
                         if len(existe_partic)==0:
-                            c.execute("INSERT INTO participaciones (partido_id,jugador_id,rol) VALUES (?,?,?)",
+                            c.execute("INSERT INTO participaciones (partido_id,jugador_id,rol) VALUES (%s,%s,%s)",
                                       (pid_f2, jid_entra, 'cambio'))
                         # Crear cobro de cuota para el suplente si no tiene uno y no es exento
                         existe_pago = q("SELECT id FROM pagos WHERE partido_id=? AND jugador_id=?",
                                         (pid_f2, jid_entra))
                         exento = bool(jrow_entra.iloc[0]['exento_arbitraje'])
                         if len(existe_pago)==0 and not exento and monto_cuota > 0:
-                            c.execute("INSERT INTO pagos (partido_id,jugador_id,monto,pagado) VALUES (?,?,?,0)",
+                            c.execute("INSERT INTO pagos (partido_id,jugador_id,monto,pagado) VALUES (%s,%s,%s,0)",
                                       (pid_f2, jid_entra, monto_cuota))
                         c.execute("""INSERT INTO cambios (partido_id,jugador_sale_id,jugador_entra_id,minuto)
                                      VALUES (?,?,?,?)""",
                                   (pid_f2, int(jrow_sale.iloc[0]['id']), jid_entra, min_c))
 
                 # Borrar goles anteriores y reinsertar
-                c.execute("DELETE FROM goles WHERE partido_id=?", (pid_f2,))
+                c.execute("DELETE FROM goles WHERE partido_id=%s", (pid_f2,))
                 if f2_gf > 0:
                     for gol_jug, gol_min in goles_nuevos:
                         if gol_jug == "⬛ Desconocido / propia puerta":
-                            c.execute("INSERT INTO goles (partido_id,jugador_id,minuto,tipo) VALUES (?,NULL,?,?)",
+                            c.execute("INSERT INTO goles (partido_id,jugador_id,minuto,tipo) VALUES (%s,NULL,%s,%s)",
                                       (pid_f2, gol_min, 'desconocido'))
                         else:
                             rows = jugadores[jugadores['nombre']==gol_jug]
                             if len(rows)>0:
-                                c.execute("INSERT INTO goles (partido_id,jugador_id,minuto,tipo) VALUES (?,?,?,?)",
+                                c.execute("INSERT INTO goles (partido_id,jugador_id,minuto,tipo) VALUES (%s,%s,%s,%s)",
                                           (pid_f2, int(rows.iloc[0]['id']), gol_min, 'normal'))
 
                 # Borrar tarjetas, sanciones y multas anteriores de este partido
-                c.execute("DELETE FROM tarjetas WHERE partido_id=?", (pid_f2,))
-                c.execute("DELETE FROM sanciones WHERE partido_origen_id=?", (pid_f2,))
-                c.execute("DELETE FROM multas WHERE partido_id=?", (pid_f2,))
+                c.execute("DELETE FROM tarjetas WHERE partido_id=%s", (pid_f2,))
+                c.execute("DELETE FROM sanciones WHERE partido_origen_id=%s", (pid_f2,))
+                c.execute("DELETE FROM multas WHERE partido_id=%s", (pid_f2,))
 
                 # Insertar tarjetas individuales + sanciones + multas
                 conteo_am_g = Counter(t['jugador'] for t in tarjetas_guardar if t['tipo']=='amarilla')
@@ -1938,7 +1895,7 @@ if IS_ADMIN:
                     rows = jugadores[jugadores['nombre']==t['jugador']]
                     if len(rows)==0: continue
                     jid = int(rows.iloc[0]['id'])
-                    c.execute("INSERT INTO tarjetas (partido_id,jugador_id,tipo,cumplida) VALUES (?,?,?,0)",
+                    c.execute("INSERT INTO tarjetas (partido_id,jugador_id,tipo,cumplida) VALUES (%s,%s,%s,0)",
                               (pid_f2, jid, t['tipo']))
 
                     # ── Multa AMARILLA: el club la paga al árbitro ese día → gasto inmediato
@@ -1955,7 +1912,7 @@ if IS_ADMIN:
                                          VALUES (?,?,?,?,0,0)""",
                                       (pid_f2, jid, concepto_m, monto_m))
                             # Gasto: el club pagó la multa al árbitro en el partido
-                            c.execute("INSERT INTO caja (partido_id,concepto,monto,fecha) VALUES (?,?,?,?)",
+                            c.execute("INSERT INTO caja (partido_id,concepto,monto,fecha) VALUES (%s,%s,%s,%s)",
                                       (pid_f2, f"Gasto multa {t['jugador']} ({concepto_m})",
                                        -monto_m, str(date.today())))
                         jugadores_multa_am_procesados.add(t['jugador'])
@@ -2246,10 +2203,10 @@ if IS_ADMIN:
                         if pago_este > 0:
                             nuevo_total = ya_pagado + pago_este
                             saldado = nuevo_total >= monto_total - 0.001
-                            conn.execute("UPDATE pagos SET monto_pagado=?, pagado=? WHERE id=?",
+                            conn.cursor().execute("UPDATE pagos SET monto_pagado=%s, pagado=%s WHERE id=%s",
                                          (nuevo_total, int(saldado), pid_p))
                             jn = q("SELECT nombre FROM jugadores WHERE id=?", (jid_pago,)).iloc[0]['nombre']
-                            conn.execute("INSERT INTO caja (partido_id,concepto,monto,fecha) VALUES (?,?,?,?)",
+                            conn.cursor().execute("INSERT INTO caja (partido_id,concepto,monto,fecha) VALUES (%s,%s,%s,%s)",
                                 (pid_f3, f"Pago cuota {jn} — {sel_f3}" + ("" if saldado else " (parcial)"),
                                  pago_este, str(date.today())))
                             restante -= pago_este
@@ -2268,10 +2225,10 @@ if IS_ADMIN:
                                 pago_da = min(restante, debe_da)
                                 nuevo_mp = float(da['mp']) + pago_da
                                 saldado_da = nuevo_mp >= float(da['monto']) - 0.001
-                                conn.execute("UPDATE pagos SET monto_pagado=?, pagado=? WHERE id=?",
+                                conn.cursor().execute("UPDATE pagos SET monto_pagado=%s, pagado=%s WHERE id=%s",
                                              (nuevo_mp, int(saldado_da), int(da['id'])))
                                 jn = q("SELECT nombre FROM jugadores WHERE id=?", (jid_pago,)).iloc[0]['nombre']
-                                conn.execute("INSERT INTO caja (partido_id,concepto,monto,fecha) VALUES (?,?,?,?)",
+                                conn.cursor().execute("INSERT INTO caja (partido_id,concepto,monto,fecha) VALUES (%s,%s,%s,%s)",
                                     (pid_f3, f"Pago deuda anterior {jn} (partido {da['partido_id']})",
                                      pago_da, str(date.today())))
                                 restante -= pago_da
@@ -2301,16 +2258,16 @@ if IS_ADMIN:
                     if pago_multa > 0.001:
                         nuevo_mp_m = ya_pagado_m + pago_multa
                         saldado_m = nuevo_mp_m >= monto_total_m - 0.001
-                        conn.execute("UPDATE multas SET monto_pagado=?, pagado=? WHERE id=?",
+                        conn.cursor().execute("UPDATE multas SET monto_pagado=%s, pagado=%s WHERE id=%s",
                                      (nuevo_mp_m, int(saldado_m), multa_id))
                         jn = q("SELECT nombre FROM jugadores WHERE id=?", (jid_m,)).iloc[0]['nombre']
-                        conn.execute("INSERT INTO caja (partido_id,concepto,monto,fecha) VALUES (?,?,?,?)",
+                        conn.cursor().execute("INSERT INTO caja (partido_id,concepto,monto,fecha) VALUES (%s,%s,%s,%s)",
                             (pid_f3, f"Multa {jn} — {mr['concepto']}" + ("" if saldado_m else " (parcial)"),
                              pago_multa, str(date.today())))
                         cambios += 1
 
                 if f3_concepto.strip():
-                    conn.execute("INSERT INTO caja (partido_id,concepto,monto,fecha) VALUES (?,?,?,?)",
+                    conn.cursor().execute("INSERT INTO caja (partido_id,concepto,monto,fecha) VALUES (%s,%s,%s,%s)",
                         (pid_f3, f3_concepto.strip(), f3_monto_extra, str(date.today())))
                     cambios += 1
 
@@ -2789,46 +2746,46 @@ with TAB_HISTORIAL:
                         else:
                             conn = get_conn()
                             # Datos básicos
-                            conn.execute("""UPDATE partidos SET fecha=?,rival=?,cancha=?,goles_favor=?,
+                            conn.cursor().execute("""UPDATE partidos SET fecha=%s,rival=%s,cancha=%s,goles_favor=%s,
                                            goles_contra=?,costo_arbitraje=?,costo_agua=?,notas=?,informe_arbitral=?
                                            WHERE id=?""",
                                          (fecha_str_edit, e_rival.strip(), e_cancha,
                                           e_gf, e_gc, e_arb, e_agua, e_notas, e_arbitral, pid_edit))
                             # Participaciones
-                            conn.execute("DELETE FROM participaciones WHERE partido_id=?", (pid_edit,))
+                            conn.cursor().execute("DELETE FROM participaciones WHERE partido_id=%s", (pid_edit,))
                             for nombre in e_titulares:
                                 rows = jugadores_all[jugadores_all['nombre']==nombre]
                                 if len(rows)>0:
-                                    conn.execute("INSERT INTO participaciones (partido_id,jugador_id,rol) VALUES (?,?,?)",
+                                    conn.cursor().execute("INSERT INTO participaciones (partido_id,jugador_id,rol) VALUES (%s,%s,%s)",
                                                  (pid_edit, int(rows.iloc[0]['id']), 'titular'))
                             for nombre in e_cambios:
                                 rows = jugadores_all[jugadores_all['nombre']==nombre]
                                 if len(rows)>0:
-                                    conn.execute("INSERT INTO participaciones (partido_id,jugador_id,rol) VALUES (?,?,?)",
+                                    conn.cursor().execute("INSERT INTO participaciones (partido_id,jugador_id,rol) VALUES (%s,%s,%s)",
                                                  (pid_edit, int(rows.iloc[0]['id']), 'cambio'))
                             # Goles
-                            conn.execute("DELETE FROM goles WHERE partido_id=?", (pid_edit,))
+                            conn.cursor().execute("DELETE FROM goles WHERE partido_id=%s", (pid_edit,))
                             for g in st.session_state.get(key_goles_edit, []):
                                 if g['nombre'] == "Desconocido / propia puerta":
-                                    conn.execute("INSERT INTO goles (partido_id,jugador_id,minuto,tipo) VALUES (?,NULL,?,?)",
+                                    conn.cursor().execute("INSERT INTO goles (partido_id,jugador_id,minuto,tipo) VALUES (%s,NULL,%s,%s)",
                                                  (pid_edit, g['minuto'], 'desconocido'))
                                 else:
                                     rows = jugadores_all[jugadores_all['nombre']==g['nombre']]
                                     if len(rows)>0:
-                                        conn.execute("INSERT INTO goles (partido_id,jugador_id,minuto,tipo) VALUES (?,?,?,?)",
+                                        conn.cursor().execute("INSERT INTO goles (partido_id,jugador_id,minuto,tipo) VALUES (%s,%s,%s,%s)",
                                                      (pid_edit, int(rows.iloc[0]['id']), g['minuto'], g['tipo']))
                             # Tarjetas
-                            conn.execute("DELETE FROM tarjetas WHERE partido_id=?", (pid_edit,))
+                            conn.cursor().execute("DELETE FROM tarjetas WHERE partido_id=%s", (pid_edit,))
                             for t in st.session_state.get(key_tarj_edit, []):
                                 rows = jugadores_all[jugadores_all['nombre']==t['nombre']]
                                 if len(rows)>0:
-                                    conn.execute("INSERT INTO tarjetas (partido_id,jugador_id,tipo,cumplida) VALUES (?,?,?,0)",
+                                    conn.cursor().execute("INSERT INTO tarjetas (partido_id,jugador_id,tipo,cumplida) VALUES (%s,%s,%s,0)",
                                                  (pid_edit, int(rows.iloc[0]['id']), t['tipo']))
                             # Caja gastos
-                            conn.execute("DELETE FROM caja WHERE partido_id=? AND concepto LIKE 'Gastos partido%'",
+                            conn.cursor().execute("DELETE FROM caja WHERE partido_id=%s AND concepto LIKE 'Gastos partido%'",
                                          (pid_edit,))
                             if e_arb + e_agua > 0:
-                                conn.execute("INSERT INTO caja (partido_id,concepto,monto,fecha) VALUES (?,?,?,?)",
+                                conn.cursor().execute("INSERT INTO caja (partido_id,concepto,monto,fecha) VALUES (%s,%s,%s,%s)",
                                              (pid_edit, f"Gastos partido vs {e_rival.strip()}",
                                               -(e_arb+e_agua), str(e_fecha)))
                             # Actualizar cobros (pagos)
@@ -2836,14 +2793,14 @@ with TAB_HISTORIAL:
                                 nm = st.session_state.get(f"ep_monto_{pid_edit}_{pg['id']}", float(pg['monto']))
                                 np = st.session_state.get(f"ep_pago_{pid_edit}_{pg['id']}", float(pg['monto_pagado']))
                                 saldado = np >= nm - 0.001
-                                conn.execute("UPDATE pagos SET monto=?, monto_pagado=?, pagado=? WHERE id=?",
+                                conn.cursor().execute("UPDATE pagos SET monto=%s, monto_pagado=%s, pagado=%s WHERE id=%s",
                                              (nm, np, int(saldado), int(pg['id'])))
                             # Actualizar multas
                             for _, m in multas_edit.iterrows():
                                 nm = st.session_state.get(f"em_monto_{pid_edit}_{m['id']}", float(m['monto']))
                                 np = st.session_state.get(f"em_pago_{pid_edit}_{m['id']}", float(m['monto_pagado']))
                                 saldado = np >= nm - 0.001
-                                conn.execute("UPDATE multas SET monto=?, monto_pagado=?, pagado=? WHERE id=?",
+                                conn.cursor().execute("UPDATE multas SET monto=%s, monto_pagado=%s, pagado=%s WHERE id=%s",
                                              (nm, np, int(saldado), int(m['id'])))
                             conn.commit(); conn.close()
                             # Limpiar session_state del editor
@@ -3077,7 +3034,7 @@ with TAB_CALENDARIO:
 
     # Próximos partidos
     proximos = q("""SELECT * FROM calendario
-                    WHERE fecha >= date('now')
+                    WHERE fecha >= CURRENT_DATE
                     ORDER BY fecha ASC, hora ASC""")
 
     if len(proximos) == 0:
@@ -3125,7 +3082,7 @@ with TAB_CALENDARIO:
 
     # Historial de partidos pasados del calendario
     pasados = q("""SELECT * FROM calendario
-                   WHERE fecha < date('now')
+                   WHERE fecha < CURRENT_DATE
                    ORDER BY fecha DESC LIMIT 10""")
     if len(pasados) > 0:
         with st.expander(f"📋 Partidos anteriores del calendario ({len(pasados)})"):
