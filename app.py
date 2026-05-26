@@ -21,17 +21,11 @@ def get_db_url():
         return None
 
 def get_conn():
-    url = get_db_url()
-    if not url:
-        st.error("❌ No se encontró SUPABASE_DB_URL en Secrets.")
-        st.stop()
-    return psycopg2.connect(url)
+    return psycopg2.connect(get_db_url())
 
 def release_conn(conn):
-    try:
-        conn.close()
-    except Exception:
-        pass
+    try: conn.close()
+    except: pass
 
 # ─── PDF GENERATOR ─────────────────────────────────────────────────────────────
 def generar_pdf_partido(pid):
@@ -835,14 +829,16 @@ with st.sidebar:
 def q(sql, params=()):
     """Execute SELECT query, return DataFrame."""
     import decimal
-    conn = get_conn()
     sql_pg = sql.replace("?", "%s")
+    conn = None
     try:
+        conn = psycopg2.connect(get_db_url())
         cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
         cur.execute(sql_pg, params if params else ())
         rows = cur.fetchall()
         col_names = [desc[0] for desc in cur.description] if cur.description else []
-        release_conn(conn)
+        conn.close()
+        conn = None
         if not rows:
             return pd.DataFrame(columns=col_names)
         df = pd.DataFrame([dict(r) for r in rows])
@@ -852,17 +848,27 @@ def q(sql, params=()):
             )
         return df
     except Exception as e:
-        release_conn(conn)
+        if conn:
+            try: conn.close()
+            except: pass
         raise e
 
 def run(sql, params=()):
     """Execute INSERT/UPDATE/DELETE."""
-    conn = get_conn()
     sql_pg = sql.replace("?", "%s")
-    cur = conn.cursor()
-    cur.execute(sql_pg, params if params else ())
-    conn.commit()
-    release_conn(conn)
+    conn = None
+    try:
+        conn = psycopg2.connect(get_db_url())
+        cur = conn.cursor()
+        cur.execute(sql_pg, params if params else ())
+        conn.commit()
+        conn.close()
+        conn = None
+    except Exception as e:
+        if conn:
+            try: conn.rollback(); conn.close()
+            except: pass
+        raise e
 
 @st.cache_data(ttl=30)
 def get_jugadores():
@@ -880,96 +886,121 @@ def saldo_caja():
         return 0.0
 
 # ── Disciplina ─────────────────────────────────────────────────────────────────
+@st.cache_data(ttl=20)
+def get_stats_bulk():
+    """Carga TODAS las estadísticas en 4 queries. Evita N queries por jugador."""
+    # Deudas
+    deudas_df = q("""
+        SELECT jugador_id, SUM(monto - COALESCE(monto_pagado,0)) as deuda
+        FROM (SELECT jugador_id, monto, monto_pagado FROM pagos WHERE pagado=0
+              UNION ALL
+              SELECT jugador_id, monto, monto_pagado FROM multas WHERE pagado=0) t
+        GROUP BY jugador_id
+    """)
+    deudas = {int(r['jugador_id']): float(r['deuda']) for _, r in deudas_df.iterrows()}
+
+    # Tarjetas amarillas por jugador por partido
+    tarj_df = q("""
+        SELECT jugador_id, partido_id, COUNT(*) as cnt
+        FROM tarjetas WHERE tipo='amarilla'
+        GROUP BY jugador_id, partido_id
+    """)
+
+    # Sanciones pendientes
+    sanc_df = q("""
+        SELECT s.jugador_id, s.motivo,
+               (s.partidos_suspension - s.partidos_cumplidos) as pendientes
+        FROM sanciones s
+        WHERE s.partidos_cumplidos < s.partidos_suspension
+    """)
+
+    # Goles
+    goles_df = q("""
+        SELECT jugador_id, COUNT(*) as total
+        FROM goles GROUP BY jugador_id
+    """)
+    goles = {int(r['jugador_id']): int(r['total']) for _, r in goles_df.iterrows()}
+
+    return deudas, tarj_df, sanc_df, goles
+
+def _calc_amarillas_activas(jugador_id, tarj_df):
+    """Calcula amarillas simples activas desde el DataFrame bulk."""
+    if len(tarj_df) == 0:
+        return 0, 0
+    jdf = tarj_df[tarj_df['jugador_id']==jugador_id]
+    if len(jdf) == 0:
+        return 0, 0
+    # Partidos con doble amarilla
+    dobles = set(jdf[jdf['cnt']>=2]['partido_id'].tolist())
+    # Solo contar amarillas simples (partidos con 1 amarilla)
+    simples = int(jdf[jdf['cnt']==1]['cnt'].sum())
+    total_amarillas = int(jdf['cnt'].sum())
+    activas = simples % 5
+    return total_amarillas, activas
+
 def amarillas_totales(jugador_id):
-    return q("SELECT COUNT(*) as c FROM tarjetas WHERE jugador_id=%s AND tipo='amarilla'", (jugador_id,))['c'][0]
+    _, tarj_df, _, _ = get_stats_bulk()
+    total, _ = _calc_amarillas_activas(jugador_id, tarj_df)
+    return total
 
 def amarillas_simples_total(jugador_id):
-    """Amarillas en partidos donde solo sacó 1 (no dobles). Estas cuentan para acumulación de 5."""
-    dobles = q("""SELECT partido_id FROM tarjetas WHERE jugador_id=%s AND tipo='amarilla'
-                  GROUP BY partido_id HAVING COUNT(*)>=2""", (jugador_id,))
-    ids_doble = set(dobles['partido_id'].tolist()) if len(dobles) > 0 else set()
-    todas = q("""SELECT partido_id, COUNT(*) as c FROM tarjetas
-                 WHERE jugador_id=%s AND tipo='amarilla' GROUP BY partido_id""", (jugador_id,))
-    return sum(row['c'] for _, row in todas.iterrows() if row['partido_id'] not in ids_doble) if len(todas) > 0 else 0
+    _, tarj_df, _, _ = get_stats_bulk()
+    if len(tarj_df) == 0: return 0
+    jdf = tarj_df[tarj_df['jugador_id']==jugador_id]
+    return int(jdf[jdf['cnt']==1]['cnt'].sum())
 
 def tarjetas_amarillas_activas(jugador_id):
-    """Amarillas simples en el ciclo actual (0-4). Al llegar a 5 genera suspensión y reinicia."""
-    return amarillas_simples_total(jugador_id) % 5
+    _, tarj_df, _, _ = get_stats_bulk()
+    _, activas = _calc_amarillas_activas(jugador_id, tarj_df)
+    return activas
 
 def partidos_doble_amarilla(jugador_id):
-    r = q("""SELECT COUNT(*) as c FROM (
-                SELECT partido_id FROM tarjetas WHERE jugador_id=%s AND tipo='amarilla'
-                GROUP BY partido_id HAVING COUNT(*)>=2)""", (jugador_id,))
-    return r['c'][0]
+    _, tarj_df, _, _ = get_stats_bulk()
+    if len(tarj_df) == 0: return 0
+    jdf = tarj_df[tarj_df['jugador_id']==jugador_id]
+    return int((jdf['cnt']>=2).sum())
 
 def sanciones_pendientes(jugador_id):
-    r = q("""SELECT COALESCE(SUM(partidos_suspension - partidos_cumplidos),0) as p
-             FROM sanciones WHERE jugador_id=%s AND partidos_cumplidos < partidos_suspension""", (jugador_id,))
-    return int(r['p'][0])
+    _, _, sanc_df, _ = get_stats_bulk()
+    if len(sanc_df) == 0: return 0
+    jdf = sanc_df[sanc_df['jugador_id']==jugador_id]
+    return int(jdf['pendientes'].sum()) if len(jdf) > 0 else 0
 
 def esta_sancionado(jugador_id):
-    pendientes = sanciones_pendientes(jugador_id)
-    activas    = tarjetas_amarillas_activas(jugador_id)
-    if pendientes > 0:
-        detalle = q("""SELECT motivo, (partidos_suspension-partidos_cumplidos) as r
-                       FROM sanciones WHERE jugador_id=%s AND partidos_cumplidos<partidos_suspension""", (jugador_id,))
-        labels = {'roja_directa':'roja directa','doble_amarilla':'doble amarilla','acumulacion_amarillas':'5 amarillas'}
-        partes = [f"{labels.get(d['motivo'],d['motivo'])} ({int(d['r'])} partido(s))" for _, d in detalle.iterrows()]
-        return f"🔴 Suspendido — {', '.join(partes)}"
+    _, _, sanc_df, _ = get_stats_bulk()
+    _, tarj_df, _, _ = get_stats_bulk()
+    _, activas = _calc_amarillas_activas(jugador_id, tarj_df)
+    if len(sanc_df) > 0:
+        jdf = sanc_df[sanc_df['jugador_id']==jugador_id]
+        if len(jdf) > 0:
+            labels = {'roja_directa':'roja directa','doble_amarilla':'doble amarilla','acumulacion_amarillas':'5 amarillas'}
+            partes = [f"{labels.get(d['motivo'],d['motivo'])} ({int(d['pendientes'])} partido(s))" for _, d in jdf.iterrows()]
+            return f"🔴 Suspendido — {', '.join(partes)}"
     if activas == 4:
         return "⚠️ En riesgo — próxima amarilla = suspensión"
     return ""
 
 def deuda_jugador(jugador_id):
-    r = q("""SELECT
-               COALESCE((SELECT SUM(monto-COALESCE(monto_pagado,0)) FROM pagos
-                         WHERE jugador_id=%s AND pagado=0),0) +
-               COALESCE((SELECT SUM(monto-COALESCE(monto_pagado,0)) FROM multas
-                         WHERE jugador_id=%s AND pagado=0),0) as d""",
-          (jugador_id, jugador_id))
-    return float(r['d'][0] or 0)
+    deudas, _, _, _ = get_stats_bulk()
+    return deudas.get(jugador_id, 0.0)
 
 def goles_jugador(jugador_id):
-    r = q("SELECT COUNT(*) as c FROM goles WHERE jugador_id=%s", (jugador_id,))
-    return int(r['c'][0] or 0)
+    _, _, _, goles = get_stats_bulk()
+    return goles.get(jugador_id, 0)
 
-# ── Bulk stats para evitar N queries por jugador ───────────────────────────────
-@st.cache_data(ttl=30)
 def get_all_deudas():
-    """Retorna dict {jugador_id: deuda_total} en una sola query."""
-    r = q("""
-        SELECT jugador_id,
-               COALESCE(SUM(monto - COALESCE(monto_pagado,0)),0) as deuda
-        FROM (
-            SELECT jugador_id, monto, monto_pagado FROM pagos WHERE pagado=0
-            UNION ALL
-            SELECT jugador_id, monto, monto_pagado FROM multas WHERE pagado=0
-        ) t
-        GROUP BY jugador_id
-    """)
-    return {int(row['jugador_id']): float(row['deuda']) for _, row in r.iterrows()}
+    deudas, _, _, _ = get_stats_bulk()
+    return deudas
 
-@st.cache_data(ttl=30)
-def get_all_tarjetas():
-    """Retorna dict {jugador_id: count_amarillas} en una sola query."""
-    r = q("""
-        SELECT jugador_id, COUNT(*) as cnt
-        FROM tarjetas WHERE tipo='amarilla'
-        GROUP BY jugador_id
-    """)
-    return {int(row['jugador_id']): int(row['cnt']) for _, row in r.iterrows()}
-
-@st.cache_data(ttl=30)
 def get_all_sanciones():
-    """Retorna dict {jugador_id: partidos_pendientes} en una sola query."""
-    r = q("""
-        SELECT jugador_id,
-               SUM(partidos_suspension - partidos_cumplidos) as pendientes
-        FROM sanciones
-        WHERE partidos_cumplidos < partidos_suspension
-        GROUP BY jugador_id
-    """)
-    return {int(row['jugador_id']): int(row['pendientes']) for _, row in r.iterrows()}
+    _, _, sanc_df, _ = get_stats_bulk()
+    if len(sanc_df) == 0: return {}
+    return {int(r['jugador_id']): int(r['pendientes']) for _, r in sanc_df.iterrows()}
+
+def get_all_tarjetas():
+    _, tarj_df, _, _ = get_stats_bulk()
+    if len(tarj_df) == 0: return {}
+    return {int(r['jugador_id']): int(r['cnt']) for _, r in tarj_df.iterrows()}
 
 def eliminar_partido_completo(pid):
     """Elimina un partido y revierte TODOS sus efectos acumulados:
