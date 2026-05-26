@@ -859,9 +859,11 @@ def get_partidos():
     return q("SELECT * FROM partidos ORDER BY id DESC")
 
 def saldo_caja():
-    r = q("SELECT SUM(monto) as total FROM caja")
-    v = r['total'][0]
-    return v if v else 0.0
+    r = q("SELECT COALESCE(SUM(monto),0) as total FROM caja")
+    try:
+        return float(r['total'][0])
+    except Exception:
+        return 0.0
 
 # ── Disciplina ─────────────────────────────────────────────────────────────────
 def amarillas_totales(jugador_id):
@@ -1199,7 +1201,7 @@ else:
 with TAB_INICIO:
     jugadores = get_jugadores()
     partidos = get_partidos()
-    saldo = saldo_caja()
+    saldo = float(saldo_caja() or 0)
 
     # KPIs
     col1, col2, col3, col4 = st.columns(4)
@@ -2355,7 +2357,7 @@ if IS_ADMIN:
 # ══════════════════════════════════════════════════════════════════════════════
 if IS_ADMIN:
  with TAB_FINANZAS:
-    saldo = saldo_caja()
+    saldo = float(saldo_caja() or 0)
     partidos = get_partidos()
     c1, c2, c3 = st.columns(3)
     with c1:
