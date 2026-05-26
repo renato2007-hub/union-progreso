@@ -172,7 +172,7 @@ def generar_pdf_partido(pid):
         return t
 
     # ── Consultas de datos ────────────────────────────────────────────────
-    p = q("SELECT * FROM partidos WHERE id=?", (pid,))
+    p = q("SELECT * FROM partidos WHERE id=%s", (pid,))
     if len(p) == 0: return None
     p = p.iloc[0]
     gf = int(p['goles_favor'] or 0)
@@ -185,7 +185,7 @@ def generar_pdf_partido(pid):
 
     partic = q("""SELECT j.nombre, pa.rol FROM participaciones pa
                   JOIN jugadores j ON pa.jugador_id=j.id
-                  WHERE pa.partido_id=? ORDER BY pa.rol DESC, j.nombre""", (pid,))
+                  WHERE pa.partido_id=%s ORDER BY pa.rol DESC, j.nombre""", (pid,))
     titulares_list = partic[partic['rol']=='titular']['nombre'].tolist()
     cambios_list   = partic[partic['rol']=='cambio']['nombre'].tolist()
 
@@ -193,19 +193,19 @@ def generar_pdf_partido(pid):
                        FROM cambios c
                        JOIN jugadores js ON c.jugador_sale_id=js.id
                        JOIN jugadores je ON c.jugador_entra_id=je.id
-                       WHERE c.partido_id=? ORDER BY c.minuto""", (pid,))
+                       WHERE c.partido_id=%s ORDER BY c.minuto""", (pid,))
 
     goles_det = q("""SELECT COALESCE(j.nombre,'Desconocido') as nombre, g.minuto, g.tipo
                      FROM goles g LEFT JOIN jugadores j ON g.jugador_id=j.id
-                     WHERE g.partido_id=? ORDER BY g.minuto""", (pid,))
+                     WHERE g.partido_id=%s ORDER BY g.minuto""", (pid,))
 
     tarj = q("""SELECT j.nombre, t.tipo FROM tarjetas t
                 JOIN jugadores j ON t.jugador_id=j.id
-                WHERE t.partido_id=? ORDER BY t.tipo, j.nombre""", (pid,))
+                WHERE t.partido_id=%s ORDER BY t.tipo, j.nombre""", (pid,))
 
     sanciones_p = q("""SELECT j.nombre, s.motivo, s.partidos_suspension, s.partidos_cumplidos
                         FROM sanciones s JOIN jugadores j ON s.jugador_id=j.id
-                        WHERE s.partido_origen_id=?""", (pid,))
+                        WHERE s.partido_origen_id=%s""", (pid,))
 
     # Jugadores que estaban suspendidos para ESTE partido
     # (sancionados en partidos ANTERIORES a este, con suspension pendiente)
@@ -219,7 +219,7 @@ def generar_pdf_partido(pid):
         JOIN partidos po ON s.partido_origen_id=po.id
         WHERE po.fecha < %s AND s.partidos_cumplidos < s.partidos_suspension
           AND j.id NOT IN (
-              SELECT jugador_id FROM participaciones WHERE partido_id=?
+              SELECT jugador_id FROM participaciones WHERE partido_id=%s
           )
         ORDER BY j.nombre
     """, (fecha_partido, pid))
@@ -229,15 +229,15 @@ def generar_pdf_partido(pid):
                  FROM pagos pg JOIN jugadores j ON pg.jugador_id=j.id
                  LEFT JOIN participaciones pa
                     ON pa.jugador_id=pg.jugador_id AND pa.partido_id=pg.partido_id
-                 WHERE pg.partido_id=? ORDER BY j.nombre""", (pid,))
+                 WHERE pg.partido_id=%s ORDER BY j.nombre""", (pid,))
 
     multas_p = q("""SELECT j.nombre, m.concepto, m.monto, COALESCE(m.monto_pagado,0) as pagado
                     FROM multas m JOIN jugadores j ON m.jugador_id=j.id
-                    WHERE m.partido_id=? ORDER BY j.nombre""", (pid,))
+                    WHERE m.partido_id=%s ORDER BY j.nombre""", (pid,))
 
     # Movimientos de caja de este partido — deduplicar por concepto+monto
     caja_p = q("""SELECT concepto, monto FROM caja
-                  WHERE partido_id=?
+                  WHERE partido_id=%s
                   GROUP BY concepto, monto
                   ORDER BY monto DESC""", (pid,))
     ingresos_caja = float(caja_p[caja_p['monto']>0]['monto'].sum()) if len(caja_p)>0 else 0.0
@@ -446,14 +446,14 @@ def generar_pdf_partido(pid):
         tot_cuota = tot_pagado = tot_debe_total = 0.0
         for _, row in pagos.iterrows():
             debe_partido = float(row['monto']) - float(row['pagado'])
-            jid = int(q("SELECT id FROM jugadores WHERE nombre=?", (row['nombre'],)).iloc[0]['id']) \
-                  if len(q("SELECT id FROM jugadores WHERE nombre=?", (row['nombre'],))) > 0 else 0
+            jid = int(q("SELECT id FROM jugadores WHERE nombre=%s", (row['nombre'],)).iloc[0]['id']) \
+                  if len(q("SELECT id FROM jugadores WHERE nombre=%s", (row['nombre'],))) > 0 else 0
             # Deuda acumulada de otros partidos
             d_otros = q("""SELECT COALESCE(SUM(monto-COALESCE(monto_pagado,0)),0) as d
-                           FROM pagos WHERE jugador_id=? AND pagado=0 AND partido_id!=?""",
+                           FROM pagos WHERE jugador_id=%s AND pagado=0 AND partido_id!=%s""",
                         (jid, pid))['d'][0] if jid else 0
             d_multas_otros = q("""SELECT COALESCE(SUM(monto-COALESCE(monto_pagado,0)),0) as d
-                                  FROM multas WHERE jugador_id=? AND pagado=0 AND partido_id!=?""",
+                                  FROM multas WHERE jugador_id=%s AND pagado=0 AND partido_id!=%s""",
                                (jid, pid))['d'][0] if jid else 0
             deuda_anterior = float(d_otros) + float(d_multas_otros)
             deuda_total = debe_partido + deuda_anterior
@@ -852,7 +852,7 @@ def q(sql, params=()):
         raise e
 
 def run(sql, params=()):
-    """Execute INSERT/UPDATE/DELETE. Converts ? to %s for PostgreSQL."""
+    """Execute INSERT/UPDATE/DELETE. Converts %s to %s for PostgreSQL."""
     conn = get_conn()
     sql_pg = sql.replace("?", "%s")
     sql_pg = sql_pg.replace("CURRENT_DATE", "CURRENT_DATE")
@@ -876,15 +876,15 @@ def saldo_caja():
 
 # ── Disciplina ─────────────────────────────────────────────────────────────────
 def amarillas_totales(jugador_id):
-    return q("SELECT COUNT(*) as c FROM tarjetas WHERE jugador_id=? AND tipo='amarilla'", (jugador_id,))['c'][0]
+    return q("SELECT COUNT(*) as c FROM tarjetas WHERE jugador_id=%s AND tipo='amarilla'", (jugador_id,))['c'][0]
 
 def amarillas_simples_total(jugador_id):
     """Amarillas en partidos donde solo sacó 1 (no dobles). Estas cuentan para acumulación de 5."""
-    dobles = q("""SELECT partido_id FROM tarjetas WHERE jugador_id=? AND tipo='amarilla'
+    dobles = q("""SELECT partido_id FROM tarjetas WHERE jugador_id=%s AND tipo='amarilla'
                   GROUP BY partido_id HAVING COUNT(*)>=2""", (jugador_id,))
     ids_doble = set(dobles['partido_id'].tolist()) if len(dobles) > 0 else set()
     todas = q("""SELECT partido_id, COUNT(*) as c FROM tarjetas
-                 WHERE jugador_id=? AND tipo='amarilla' GROUP BY partido_id""", (jugador_id,))
+                 WHERE jugador_id=%s AND tipo='amarilla' GROUP BY partido_id""", (jugador_id,))
     return sum(row['c'] for _, row in todas.iterrows() if row['partido_id'] not in ids_doble) if len(todas) > 0 else 0
 
 def tarjetas_amarillas_activas(jugador_id):
@@ -893,13 +893,13 @@ def tarjetas_amarillas_activas(jugador_id):
 
 def partidos_doble_amarilla(jugador_id):
     r = q("""SELECT COUNT(*) as c FROM (
-                SELECT partido_id FROM tarjetas WHERE jugador_id=? AND tipo='amarilla'
+                SELECT partido_id FROM tarjetas WHERE jugador_id=%s AND tipo='amarilla'
                 GROUP BY partido_id HAVING COUNT(*)>=2)""", (jugador_id,))
     return r['c'][0]
 
 def sanciones_pendientes(jugador_id):
     r = q("""SELECT COALESCE(SUM(partidos_suspension - partidos_cumplidos),0) as p
-             FROM sanciones WHERE jugador_id=? AND partidos_cumplidos < partidos_suspension""", (jugador_id,))
+             FROM sanciones WHERE jugador_id=%s AND partidos_cumplidos < partidos_suspension""", (jugador_id,))
     return int(r['p'][0])
 
 def esta_sancionado(jugador_id):
@@ -907,7 +907,7 @@ def esta_sancionado(jugador_id):
     activas    = tarjetas_amarillas_activas(jugador_id)
     if pendientes > 0:
         detalle = q("""SELECT motivo, (partidos_suspension-partidos_cumplidos) as r
-                       FROM sanciones WHERE jugador_id=? AND partidos_cumplidos<partidos_suspension""", (jugador_id,))
+                       FROM sanciones WHERE jugador_id=%s AND partidos_cumplidos<partidos_suspension""", (jugador_id,))
         labels = {'roja_directa':'roja directa','doble_amarilla':'doble amarilla','acumulacion_amarillas':'5 amarillas'}
         partes = [f"{labels.get(d['motivo'],d['motivo'])} ({int(d['r'])} partido(s))" for _, d in detalle.iterrows()]
         return f"🔴 Suspendido — {', '.join(partes)}"
@@ -918,16 +918,16 @@ def esta_sancionado(jugador_id):
 def deuda_jugador(jugador_id):
     """Suma deuda real = monto total - lo que ya pagó (soporta pagos parciales)."""
     r = q("""SELECT COALESCE(SUM(monto - COALESCE(monto_pagado,0)),0) as d
-             FROM pagos WHERE jugador_id=? AND pagado=0""", (jugador_id,))
+             FROM pagos WHERE jugador_id=%s AND pagado=0""", (jugador_id,))
     d1 = r['d'][0]
     r2 = q("""SELECT COALESCE(SUM(monto - COALESCE(monto_pagado,0)),0) as d
-              FROM multas WHERE jugador_id=? AND pagado=0""", (jugador_id,))
+              FROM multas WHERE jugador_id=%s AND pagado=0""", (jugador_id,))
     d2 = r2['d'][0]
     return d1 + d2
 
 # ── Goles ──────────────────────────────────────────────────────────────────────
 def goles_jugador(jugador_id):
-    r = q("SELECT COUNT(*) as c FROM goles WHERE jugador_id=?", (jugador_id,))
+    r = q("SELECT COUNT(*) as c FROM goles WHERE jugador_id=%s", (jugador_id,))
     return r['c'][0]
 
 def eliminar_partido_completo(pid):
@@ -947,12 +947,12 @@ def eliminar_partido_completo(pid):
 
     # 2. Restaurar pagos parciales: los jugadores que tenían pagado=1 por este partido
     #    deben quedar pendientes de nuevo
-    pagos_del_partido = q("SELECT id, jugador_id, monto FROM pagos WHERE partido_id=?", (pid,))
+    pagos_del_partido = q("SELECT id, jugador_id, monto FROM pagos WHERE partido_id=%s", (pid,))
     for _, pg in pagos_del_partido.iterrows():
         conn.cursor().execute("UPDATE pagos SET monto_pagado=0, pagado=0 WHERE id=%s", (int(pg['id']),))
 
     # 3. Restaurar multas pagadas de este partido
-    multas_del_partido = q("SELECT id FROM multas WHERE partido_id=?", (pid,))
+    multas_del_partido = q("SELECT id FROM multas WHERE partido_id=%s", (pid,))
     for _, m in multas_del_partido.iterrows():
         conn.cursor().execute("UPDATE multas SET monto_pagado=0, pagado=0 WHERE id=%s", (int(m['id']),))
 
@@ -1294,7 +1294,7 @@ if IS_ADMIN:
         jid = int(j['id'])
         amarillas = amarillas_totales(jid)
         activas = tarjetas_amarillas_activas(jid)
-        rojas = q("SELECT COUNT(*) as c FROM tarjetas WHERE jugador_id=? AND tipo='roja'", (jid,))['c'][0]
+        rojas = q("SELECT COUNT(*) as c FROM tarjetas WHERE jugador_id=%s AND tipo='roja'", (jid,))['c'][0]
         rojas_pend = sanciones_pendientes(jid)
         deuda = deuda_jugador(jid)
         sancion = esta_sancionado(jid)
@@ -1341,7 +1341,7 @@ if IS_ADMIN:
                 exento_uni = st.checkbox("Exento de uniforme")
         if st.form_submit_button("✅ Agregar jugador"):
             if nombre:
-                run("INSERT INTO jugadores (nombre, numero, posicion, exento_arbitraje, exento_uniforme) VALUES (?,?,?,?,?)",
+                run("INSERT INTO jugadores (nombre, numero, posicion, exento_arbitraje, exento_uniforme) VALUES (%s,%s,%s,%s,%s)",
                     (nombre, numero, posicion, int(exento_arb), int(exento_uni)))
                 guardar_db_en_github()
                 st.success(f"✅ {nombre} agregado al plantel")
@@ -1371,14 +1371,14 @@ if IS_ADMIN:
             col_s, col_d = st.columns(2)
             with col_s:
                 if st.form_submit_button("💾 Guardar cambios"):
-                    run("UPDATE jugadores SET nombre=?, numero=?, posicion=?, exento_arbitraje=?, exento_uniforme=? WHERE id=?",
+                    run("UPDATE jugadores SET nombre=%s, numero=%s, posicion=%s, exento_arbitraje=%s, exento_uniforme=%s WHERE id=%s",
                         (n_nombre, n_num, n_pos, int(n_exarb), int(n_exuni), int(j_sel['id'])))
                     guardar_db_en_github()
                     st.success("✅ Jugador actualizado")
                     st.rerun()
             with col_d:
                 if st.form_submit_button("🗑️ Desactivar jugador"):
-                    run("UPDATE jugadores SET activo=0 WHERE id=?", (int(j_sel['id']),))
+                    run("UPDATE jugadores SET activo=0 WHERE id=%s", (int(j_sel['id']),))
                     guardar_db_en_github()
                     st.warning(f"Jugador {j_sel['nombre']} desactivado")
                     st.rerun()
@@ -1565,7 +1565,7 @@ if IS_ADMIN:
         else:
             # ── Validar partido duplicado (misma fecha + mismo rival) ───
             duplicado = q("""SELECT id FROM partidos
-                             WHERE fecha=? AND LOWER(rival)=LOWER(?)""",
+                             WHERE fecha=%s AND LOWER(rival)=LOWER(%s)""",
                           (str(f1_fecha), f1_rival.strip()))
             if len(duplicado) > 0:
                 st.error(f"⚠️ Ya existe un partido registrado el {f1_fecha} contra '{f1_rival.strip()}'. "
@@ -1573,7 +1573,7 @@ if IS_ADMIN:
             else:
                 conn = get_conn(); c = conn.cursor()
                 c.execute("""INSERT INTO partidos (fecha,rival,cancha,goles_favor,goles_contra,
-                             costo_arbitraje,costo_agua,notas) VALUES (?,?,?,0,0,?,?,?)""",
+                             costo_arbitraje,costo_agua,notas) VALUES (%s,%s,%s,0,0,%s,%s,%s)""",
                           (str(f1_fecha), f1_rival.strip(), f1_cancha, f1_arb, f1_agua, ""))
                 pid = c.lastrowid
                 # Titulares
@@ -1590,7 +1590,7 @@ if IS_ADMIN:
                                   (pid, int(jrow_entra.iloc[0]['id']), 'cambio'))
                     if len(jrow_entra)>0 and len(jrow_sale)>0:
                         c.execute("""INSERT INTO cambios (partido_id,jugador_sale_id,jugador_entra_id,minuto)
-                                     VALUES (?,?,?,?)""",
+                                     VALUES (%s,%s,%s,%s)""",
                                   (pid, int(jrow_sale.iloc[0]['id']),
                                    int(jrow_entra.iloc[0]['id']), min_c))
                 # Cobros pendientes para no exentos
@@ -1638,7 +1638,7 @@ if IS_ADMIN:
             # Participantes titulares de este partido
             partic_f2 = q("""SELECT j.nombre, pa.rol FROM participaciones pa
                              JOIN jugadores j ON pa.jugador_id=j.id
-                             WHERE pa.partido_id=?""", (pid_f2,))
+                             WHERE pa.partido_id=%s""", (pid_f2,))
             nombres_f2 = partic_f2['nombre'].tolist() if len(partic_f2)>0 else nombres
             titulares_f2 = partic_f2[partic_f2['rol']=='titular']['nombre'].tolist() if len(partic_f2)>0 else []
 
@@ -1650,7 +1650,7 @@ if IS_ADMIN:
                                      FROM cambios c
                                      JOIN jugadores js ON c.jugador_sale_id=js.id
                                      JOIN jugadores je ON c.jugador_entra_id=je.id
-                                     WHERE c.partido_id=? ORDER BY c.minuto""", (pid_f2,))
+                                     WHERE c.partido_id=%s ORDER BY c.minuto""", (pid_f2,))
             n_cambios_guardados = len(cambios_guardados)
 
             n_cambios_f2 = st.number_input("¿Cuántos cambios hubo?", min_value=0, max_value=5,
@@ -1725,7 +1725,7 @@ if IS_ADMIN:
                 # Cargar tarjetas ya guardadas de este partido
                 tarj_existentes = q("""SELECT t.tipo, j.nombre FROM tarjetas t
                                        JOIN jugadores j ON t.jugador_id=j.id
-                                       WHERE t.partido_id=? ORDER BY t.id""", (pid_f2,))
+                                       WHERE t.partido_id=%s ORDER BY t.id""", (pid_f2,))
                 st.session_state[key_tarj] = [
                     {"jugador": row['nombre'], "tipo": row['tipo'], "minuto": 1}
                     for _, row in tarj_existentes.iterrows()
@@ -1854,7 +1854,7 @@ if IS_ADMIN:
                 c.execute("DELETE FROM cambios WHERE partido_id=%s", (pid_f2,))
                 # Obtener cuota ORIGINAL del partido (monto máximo registrado = cuota completa)
                 p_cuota = q("""SELECT MAX(pg.monto) as monto FROM pagos pg
-                               WHERE pg.partido_id=?""", (pid_f2,))
+                               WHERE pg.partido_id=%s""", (pid_f2,))
                 monto_cuota = float(p_cuota.iloc[0]['monto']) if len(p_cuota) > 0 and p_cuota.iloc[0]['monto'] else 0.0
 
                 for sale_n, entra_n, min_c in cambios_data_f2:
@@ -1862,20 +1862,20 @@ if IS_ADMIN:
                     jrow_entra = jugadores[jugadores['nombre']==entra_n]
                     if len(jrow_sale)>0 and len(jrow_entra)>0:
                         jid_entra = int(jrow_entra.iloc[0]['id'])
-                        existe_partic = q("SELECT id FROM participaciones WHERE partido_id=? AND jugador_id=?",
+                        existe_partic = q("SELECT id FROM participaciones WHERE partido_id=%s AND jugador_id=%s",
                                    (pid_f2, jid_entra))
                         if len(existe_partic)==0:
                             c.execute("INSERT INTO participaciones (partido_id,jugador_id,rol) VALUES (%s,%s,%s)",
                                       (pid_f2, jid_entra, 'cambio'))
                         # Crear cobro de cuota para el suplente si no tiene uno y no es exento
-                        existe_pago = q("SELECT id FROM pagos WHERE partido_id=? AND jugador_id=?",
+                        existe_pago = q("SELECT id FROM pagos WHERE partido_id=%s AND jugador_id=%s",
                                         (pid_f2, jid_entra))
                         exento = bool(jrow_entra.iloc[0]['exento_arbitraje'])
                         if len(existe_pago)==0 and not exento and monto_cuota > 0:
                             c.execute("INSERT INTO pagos (partido_id,jugador_id,monto,pagado) VALUES (%s,%s,%s,0)",
                                       (pid_f2, jid_entra, monto_cuota))
                         c.execute("""INSERT INTO cambios (partido_id,jugador_sale_id,jugador_entra_id,minuto)
-                                     VALUES (?,?,?,?)""",
+                                     VALUES (%s,%s,%s,%s)""",
                                   (pid_f2, int(jrow_sale.iloc[0]['id']), jid_entra, min_c))
 
                 # Borrar goles anteriores y reinsertar
@@ -1920,7 +1920,7 @@ if IS_ADMIN:
                             concepto_m = f"Multa amarilla vs {p_data['rival']}"
                         if monto_m > 0:
                             c.execute("""INSERT INTO multas (partido_id,jugador_id,concepto,monto,monto_pagado,pagado)
-                                         VALUES (?,?,?,?,0,0)""",
+                                         VALUES (%s,%s,%s,%s,0,0)""",
                                       (pid_f2, jid, concepto_m, monto_m))
                             # Gasto: el club pagó la multa al árbitro en el partido
                             c.execute("INSERT INTO caja (partido_id,concepto,monto,fecha) VALUES (%s,%s,%s,%s)",
@@ -1935,7 +1935,7 @@ if IS_ADMIN:
                         if monto_m > 0:
                             concepto_ro = f"Multa roja directa vs {p_data['rival']}"
                             c.execute("""INSERT INTO multas (partido_id,jugador_id,concepto,monto,monto_pagado,pagado)
-                                         VALUES (?,?,?,?,0,0)""",
+                                         VALUES (%s,%s,%s,%s,0,0)""",
                                       (pid_f2, jid, concepto_ro, monto_m))
                             # NO hay gasto de caja — la multa la paga el jugador al cumplir sanción
                         jugadores_multa_ro_procesados.add(t['jugador'])
@@ -1947,14 +1947,14 @@ if IS_ADMIN:
                     jid = int(rows.iloc[0]['id'])
                     if cant >= 2:
                         c.execute("""INSERT INTO sanciones (jugador_id,partido_origen_id,motivo,
-                                     partidos_suspension,partidos_cumplidos) VALUES (?,?,'doble_amarilla',1,0)""",
+                                     partidos_suspension,partidos_cumplidos) VALUES (%s,%s,'doble_amarilla',1,0)""",
                                   (jid, pid_f2))
                         sanciones_gen.append(f"🟨🟨 {nombre}: 1 partido")
                     else:
                         total_s = amarillas_simples_total(jid) + 1
                         if total_s % 5 == 0:
                             c.execute("""INSERT INTO sanciones (jugador_id,partido_origen_id,motivo,
-                                         partidos_suspension,partidos_cumplidos) VALUES (?,?,'acumulacion_amarillas',1,0)""",
+                                         partidos_suspension,partidos_cumplidos) VALUES (%s,%s,'acumulacion_amarillas',1,0)""",
                                       (jid, pid_f2))
                             sanciones_gen.append(f"🟨×5 {nombre}: 1 partido")
 
@@ -1965,7 +1965,7 @@ if IS_ADMIN:
                         jid = int(rows.iloc[0]['id'])
                         n_part_ro = st.session_state.get(key_partidos_ro, 2)
                         c.execute("""INSERT INTO sanciones (jugador_id,partido_origen_id,motivo,
-                                     partidos_suspension,partidos_cumplidos) VALUES (?,?,'roja_directa',?,0)""",
+                                     partidos_suspension,partidos_cumplidos) VALUES (%s,%s,'roja_directa',%s,0)""",
                                   (jid, pid_f2, int(n_part_ro)))
                         sanciones_gen.append(f"🟥 {t['jugador']}: {int(n_part_ro)} partido(s)")
 
@@ -2000,23 +2000,23 @@ if IS_ADMIN:
             pid_f3 = int(partidos_list.iloc[opciones_f3[1:].index(sel_f3)]['id'])
 
             # ── Auto-crear pagos para suplentes no exentos sin cuota ────────
-            monto_ref = q("SELECT MAX(monto) as m FROM pagos WHERE partido_id=?", (pid_f3,))
+            monto_ref = q("SELECT MAX(monto) as m FROM pagos WHERE partido_id=%s", (pid_f3,))
             monto_cuota_f3 = float(monto_ref.iloc[0]['m']) if len(monto_ref)>0 and monto_ref.iloc[0]['m'] else 0.0
             if monto_cuota_f3 > 0:
                 suplentes_sin_pago = q("""
                     SELECT pa.jugador_id FROM participaciones pa
                     JOIN jugadores j ON j.id=pa.jugador_id
-                    WHERE pa.partido_id=? AND pa.rol='cambio'
+                    WHERE pa.partido_id=%s AND pa.rol='cambio'
                       AND j.exento_arbitraje=0
                       AND pa.jugador_id NOT IN (
-                          SELECT jugador_id FROM pagos WHERE partido_id=?
+                          SELECT jugador_id FROM pagos WHERE partido_id=%s
                       )
                 """, (pid_f3, pid_f3))
                 if len(suplentes_sin_pago) > 0:
                     conn_fix = get_conn()
                     for _, sp in suplentes_sin_pago.iterrows():
                         conn_fix.execute(
-                            "INSERT INTO pagos (partido_id,jugador_id,monto,pagado) VALUES (?,?,?,0)",
+                            "INSERT INTO pagos (partido_id,jugador_id,monto,pagado) VALUES (%s,%s,%s,0)",
                             (pid_f3, int(sp['jugador_id']), monto_cuota_f3))
                     conn_fix.commit(); conn_fix.close()
                     st.rerun()
@@ -2031,7 +2031,7 @@ if IS_ADMIN:
                 JOIN jugadores j ON pg.jugador_id=j.id
                 LEFT JOIN participaciones pa
                     ON pa.jugador_id=pg.jugador_id AND pa.partido_id=pg.partido_id
-                WHERE pg.partido_id=?
+                WHERE pg.partido_id=%s
                 ORDER BY pa.rol DESC, j.nombre
             """, (pid_f3,))
 
@@ -2043,9 +2043,9 @@ if IS_ADMIN:
                 JOIN jugadores j ON j.id=m.jugador_id
                 LEFT JOIN participaciones pa
                     ON pa.jugador_id=m.jugador_id AND pa.partido_id=m.partido_id
-                WHERE m.partido_id=? AND m.pagado=0
+                WHERE m.partido_id=%s AND m.pagado=0
                   AND m.jugador_id NOT IN (
-                      SELECT jugador_id FROM pagos WHERE partido_id=?
+                      SELECT jugador_id FROM pagos WHERE partido_id=%s
                   )
                 ORDER BY j.nombre
             """, (pid_f3, pid_f3))
@@ -2059,7 +2059,7 @@ if IS_ADMIN:
                 # Sumar multas de este partido
                 multas_partido = q("""SELECT COALESCE(SUM(monto),0) as t,
                                              COALESCE(SUM(monto_pagado),0) as p
-                                      FROM multas WHERE partido_id=?""", (pid_f3,))
+                                      FROM multas WHERE partido_id=%s""", (pid_f3,))
                 total_multas_p   = float(multas_partido.iloc[0]['t'])
                 cobrado_multas_p = float(multas_partido.iloc[0]['p'])
 
@@ -2098,15 +2098,15 @@ if IS_ADMIN:
 
                     # Multas de ESTE partido
                     multas_jug = q("""SELECT id, concepto, monto, COALESCE(monto_pagado,0) as mp
-                                      FROM multas WHERE jugador_id=? AND pagado=0 AND partido_id=?
+                                      FROM multas WHERE jugador_id=%s AND pagado=0 AND partido_id=%s
                                    """, (jid, pid_f3))
                     multa_total_este = float(multas_jug['monto'].sum() - multas_jug['mp'].sum()) if len(multas_jug) > 0 else 0.0
 
                     # Deuda de OTROS partidos
                     deuda_ant_cuotas = float(q("""SELECT COALESCE(SUM(monto-COALESCE(monto_pagado,0)),0) as d
-                        FROM pagos WHERE jugador_id=? AND pagado=0 AND partido_id!=?""", (jid, pid_f3))['d'][0])
+                        FROM pagos WHERE jugador_id=%s AND pagado=0 AND partido_id!=%s""", (jid, pid_f3))['d'][0])
                     deuda_ant_multas = float(q("""SELECT COALESCE(SUM(monto-COALESCE(monto_pagado,0)),0) as d
-                        FROM multas WHERE jugador_id=? AND pagado=0 AND partido_id!=?""", (jid, pid_f3))['d'][0])
+                        FROM multas WHERE jugador_id=%s AND pagado=0 AND partido_id!=%s""", (jid, pid_f3))['d'][0])
                     deuda_anterior = deuda_ant_cuotas + deuda_ant_multas
                     deuda_total    = cuota_pendiente + multa_total_este + deuda_anterior
 
@@ -2150,13 +2150,13 @@ if IS_ADMIN:
                 for _, srow in solo_multas_df.iterrows():
                     jid_s = int(srow['jugador_id'])
                     multas_s = q("""SELECT id, concepto, monto, COALESCE(monto_pagado,0) as mp
-                                    FROM multas WHERE jugador_id=? AND pagado=0 AND partido_id=?
+                                    FROM multas WHERE jugador_id=%s AND pagado=0 AND partido_id=%s
                                  """, (jid_s, pid_f3))
                     multa_tot_s = float(multas_s['monto'].sum() - multas_s['mp'].sum()) if len(multas_s)>0 else 0.0
                     deuda_ant_s = float(q("""SELECT COALESCE(SUM(monto-COALESCE(monto_pagado,0)),0) as d
-                        FROM pagos WHERE jugador_id=? AND pagado=0""", (jid_s,))['d'][0]) + \
+                        FROM pagos WHERE jugador_id=%s AND pagado=0""", (jid_s,))['d'][0]) + \
                                   float(q("""SELECT COALESCE(SUM(monto-COALESCE(monto_pagado,0)),0) as d
-                        FROM multas WHERE jugador_id=? AND pagado=0 AND partido_id!=?""", (jid_s, pid_f3))['d'][0])
+                        FROM multas WHERE jugador_id=%s AND pagado=0 AND partido_id!=%s""", (jid_s, pid_f3))['d'][0])
                     deuda_tot_s = multa_tot_s + deuda_ant_s
                     rol_s = "Titular" if srow['rol']=='titular' else ("Cambio" if srow['rol']=='cambio' else "")
                     color_tot_s = "#007a30" if deuda_tot_s < 0.001 else "#cc0000"
@@ -2216,7 +2216,7 @@ if IS_ADMIN:
                             saldado = nuevo_total >= monto_total - 0.001
                             conn.cursor().execute("UPDATE pagos SET monto_pagado=%s, pagado=%s WHERE id=%s",
                                          (nuevo_total, int(saldado), pid_p))
-                            jn = q("SELECT nombre FROM jugadores WHERE id=?", (jid_pago,)).iloc[0]['nombre']
+                            jn = q("SELECT nombre FROM jugadores WHERE id=%s", (jid_pago,)).iloc[0]['nombre']
                             conn.cursor().execute("INSERT INTO caja (partido_id,concepto,monto,fecha) VALUES (%s,%s,%s,%s)",
                                 (pid_f3, f"Pago cuota {jn} — {sel_f3}" + ("" if saldado else " (parcial)"),
                                  pago_este, str(date.today())))
@@ -2227,7 +2227,7 @@ if IS_ADMIN:
                         if restante > 0.001:
                             deudas_anteriores = q("""
                                 SELECT id, monto, COALESCE(monto_pagado,0) as mp, partido_id
-                                FROM pagos WHERE jugador_id=? AND pagado=0 AND partido_id!=?
+                                FROM pagos WHERE jugador_id=%s AND pagado=0 AND partido_id!=%s
                                 ORDER BY partido_id ASC
                             """, (jid_pago, pid_f3))
                             for _, da in deudas_anteriores.iterrows():
@@ -2238,7 +2238,7 @@ if IS_ADMIN:
                                 saldado_da = nuevo_mp >= float(da['monto']) - 0.001
                                 conn.cursor().execute("UPDATE pagos SET monto_pagado=%s, pagado=%s WHERE id=%s",
                                              (nuevo_mp, int(saldado_da), int(da['id'])))
-                                jn = q("SELECT nombre FROM jugadores WHERE id=?", (jid_pago,)).iloc[0]['nombre']
+                                jn = q("SELECT nombre FROM jugadores WHERE id=%s", (jid_pago,)).iloc[0]['nombre']
                                 conn.cursor().execute("INSERT INTO caja (partido_id,concepto,monto,fecha) VALUES (%s,%s,%s,%s)",
                                     (pid_f3, f"Pago deuda anterior {jn} (partido {da['partido_id']})",
                                      pago_da, str(date.today())))
@@ -2249,11 +2249,11 @@ if IS_ADMIN:
                 for multa_id, (ya_pagado_m, monto_total_m, paga_total_j) in nuevas_multas.items():
                     if paga_total_j <= 0:
                         continue
-                    mr = q("SELECT jugador_id, concepto FROM multas WHERE id=?", (multa_id,)).iloc[0]
+                    mr = q("SELECT jugador_id, concepto FROM multas WHERE id=%s", (multa_id,)).iloc[0]
                     jid_m = int(mr['jugador_id'])
                     # Para jugadores con cuota: el excedente sobre la cuota va a multa
                     # Para exentos (sin cuota): todo lo que pagan va directo a multa
-                    cuota_row = q("SELECT monto, COALESCE(monto_pagado,0) as mp FROM pagos WHERE partido_id=? AND jugador_id=?",
+                    cuota_row = q("SELECT monto, COALESCE(monto_pagado,0) as mp FROM pagos WHERE partido_id=%s AND jugador_id=%s",
                                   (pid_f3, jid_m))
                     if len(cuota_row) > 0:
                         cuota_original = float(cuota_row.iloc[0]['monto'])
@@ -2271,7 +2271,7 @@ if IS_ADMIN:
                         saldado_m = nuevo_mp_m >= monto_total_m - 0.001
                         conn.cursor().execute("UPDATE multas SET monto_pagado=%s, pagado=%s WHERE id=%s",
                                      (nuevo_mp_m, int(saldado_m), multa_id))
-                        jn = q("SELECT nombre FROM jugadores WHERE id=?", (jid_m,)).iloc[0]['nombre']
+                        jn = q("SELECT nombre FROM jugadores WHERE id=%s", (jid_m,)).iloc[0]['nombre']
                         conn.cursor().execute("INSERT INTO caja (partido_id,concepto,monto,fecha) VALUES (%s,%s,%s,%s)",
                             (pid_f3, f"Multa {jn} — {mr['concepto']}" + ("" if saldado_m else " (parcial)"),
                              pago_multa, str(date.today())))
@@ -2332,7 +2332,7 @@ if IS_ADMIN:
                 if st.session_state.get(kc):
                     st.markdown(f"<small style='color:#7a3030;'>¿Confirmas que <b>{s['nombre']}</b> se perdió un partido?</small>", unsafe_allow_html=True)
                     if st.button("✅ Sí, cumplida", type="primary", key=f"cfm_{s['id']}"):
-                        run("UPDATE sanciones SET partidos_cumplidos=? WHERE id=?",
+                        run("UPDATE sanciones SET partidos_cumplidos=%s WHERE id=%s",
                             (int(s['partidos_cumplidos'])+1, int(s['id'])))
                         st.session_state[kc] = False
                         nuevo_cumplido = int(s['partidos_cumplidos'])+1
@@ -2399,7 +2399,7 @@ if IS_ADMIN:
         with c3: fecha_caja = st.date_input("Fecha", value=date.today(), key="fecha_caja")
         if st.form_submit_button("💾 Registrar"):
             if concepto_caja:
-                run("INSERT INTO caja (partido_id,concepto,monto,fecha) VALUES (?,?,?,?)",
+                run("INSERT INTO caja (partido_id,concepto,monto,fecha) VALUES (%s,%s,%s,%s)",
                     (None, concepto_caja, monto_caja, str(fecha_caja)))
                 st.success("✅ Movimiento registrado"); st.rerun()
 
@@ -2413,14 +2413,14 @@ if IS_ADMIN:
             # Detalle cuotas pendientes
             cuotas_pend = q("""SELECT pa.fecha, pa.rival, pg.monto, COALESCE(pg.monto_pagado,0) as pagado
                                FROM pagos pg JOIN partidos pa ON pg.partido_id=pa.id
-                               WHERE pg.jugador_id=? AND pg.pagado=0""", (jid,))
+                               WHERE pg.jugador_id=%s AND pg.pagado=0""", (jid,))
             detalle_c = ", ".join([
                 f"vs {r['rival']} (${r['monto']-r['pagado']:,.2f})"
                 for _, r in cuotas_pend.iterrows()
             ])
             # Detalle multas pendientes
             multas_pend = q("""SELECT m.concepto, m.monto, COALESCE(m.monto_pagado,0) as pagado
-                               FROM multas m WHERE m.jugador_id=? AND m.pagado=0""", (jid,))
+                               FROM multas m WHERE m.jugador_id=%s AND m.pagado=0""", (jid,))
             detalle_m = ", ".join([
                 f"{r['concepto']} (${r['monto']-r['pagado']:,.2f})"
                 for _, r in multas_pend.iterrows()
@@ -2449,7 +2449,7 @@ with TAB_DISCIPLINA:
         am_t = amarillas_totales(jid)
         am_c = tarjetas_amarillas_activas(jid)
         am_d = partidos_doble_amarilla(jid)
-        ro_t = q("SELECT COUNT(*) as c FROM tarjetas WHERE jugador_id=? AND tipo='roja'", (jid,))['c'][0]
+        ro_t = q("SELECT COUNT(*) as c FROM tarjetas WHERE jugador_id=%s AND tipo='roja'", (jid,))['c'][0]
         pend = sanciones_pendientes(jid)
         sanc = esta_sancionado(jid)
         estado = sanc if sanc else "✅ Disponible"
@@ -2510,7 +2510,7 @@ with TAB_HISTORIAL:
                                  (pg.monto - COALESCE(pg.monto_pagado,0)) as pendiente,
                                  'Cuota arbitraje' as tipo
                           FROM pagos pg JOIN partidos pa ON pg.partido_id=pa.id
-                          WHERE pg.jugador_id=? AND pg.pagado=0
+                          WHERE pg.jugador_id=%s AND pg.pagado=0
                             AND (pg.monto - COALESCE(pg.monto_pagado,0)) > 0.001""", (jid,))
 
             # Multas pendientes
@@ -2518,7 +2518,7 @@ with TAB_HISTORIAL:
                                       (m.monto - COALESCE(m.monto_pagado,0)) as pendiente,
                                       m.concepto as tipo
                                FROM multas m JOIN partidos pa ON m.partido_id=pa.id
-                               WHERE m.jugador_id=? AND m.pagado=0
+                               WHERE m.jugador_id=%s AND m.pagado=0
                                  AND (m.monto - COALESCE(m.monto_pagado,0)) > 0.001""", (jid,))
 
             total_cuotas = float(cuotas['pendiente'].sum()) if len(cuotas) > 0 else 0.0
@@ -2608,7 +2608,7 @@ with TAB_HISTORIAL:
                 st.markdown("**⚽ Alineación**")
                 partic_edit = q("""SELECT j.nombre, pa.rol FROM participaciones pa
                                    JOIN jugadores j ON pa.jugador_id=j.id
-                                   WHERE pa.partido_id=? ORDER BY pa.rol DESC, j.nombre""", (pid_edit,))
+                                   WHERE pa.partido_id=%s ORDER BY pa.rol DESC, j.nombre""", (pid_edit,))
                 tit_act = partic_edit[partic_edit['rol']=='titular']['nombre'].tolist()
                 cam_act = partic_edit[partic_edit['rol']=='cambio']['nombre'].tolist()
                 e_titulares = st.multiselect("Titulares", nombres_all, default=[n for n in tit_act if n in nombres_all], key=f"e_tit_{pid_edit}")
@@ -2619,7 +2619,7 @@ with TAB_HISTORIAL:
                 goles_act = q("""SELECT g.id, COALESCE(j.nombre,'Desconocido') as nombre,
                                         g.minuto, g.tipo, g.jugador_id
                                  FROM goles g LEFT JOIN jugadores j ON g.jugador_id=j.id
-                                 WHERE g.partido_id=? ORDER BY g.minuto""", (pid_edit,))
+                                 WHERE g.partido_id=%s ORDER BY g.minuto""", (pid_edit,))
                 nombres_con_desc = nombres_all + ["Desconocido / propia puerta"]
 
                 # Mostrar goles existentes con opción de eliminar
@@ -2663,7 +2663,7 @@ with TAB_HISTORIAL:
                 st.markdown("**🟨 Tarjetas**")
                 tarj_act = q("""SELECT t.id, j.nombre, t.tipo
                                 FROM tarjetas t JOIN jugadores j ON t.jugador_id=j.id
-                                WHERE t.partido_id=? ORDER BY t.tipo, j.nombre""", (pid_edit,))
+                                WHERE t.partido_id=%s ORDER BY t.tipo, j.nombre""", (pid_edit,))
 
                 key_tarj_edit = f"tarj_edit_{pid_edit}"
                 if key_tarj_edit not in st.session_state:
@@ -2702,7 +2702,7 @@ with TAB_HISTORIAL:
                 pagos_edit = q("""SELECT pg.id, j.nombre, pg.monto,
                                          COALESCE(pg.monto_pagado,0) as monto_pagado, pg.pagado
                                   FROM pagos pg JOIN jugadores j ON pg.jugador_id=j.id
-                                  WHERE pg.partido_id=? ORDER BY j.nombre""", (pid_edit,))
+                                  WHERE pg.partido_id=%s ORDER BY j.nombre""", (pid_edit,))
 
                 if len(pagos_edit) > 0:
                     for _, pg in pagos_edit.iterrows():
@@ -2725,7 +2725,7 @@ with TAB_HISTORIAL:
                 multas_edit = q("""SELECT m.id, j.nombre, m.concepto, m.monto,
                                           COALESCE(m.monto_pagado,0) as monto_pagado
                                    FROM multas m JOIN jugadores j ON m.jugador_id=j.id
-                                   WHERE m.partido_id=? ORDER BY j.nombre""", (pid_edit,))
+                                   WHERE m.partido_id=%s ORDER BY j.nombre""", (pid_edit,))
 
                 if len(multas_edit) > 0:
                     for _, m in multas_edit.iterrows():
@@ -2750,7 +2750,7 @@ with TAB_HISTORIAL:
                     if st.button("💾 Guardar todos los cambios", type="primary", key=f"btn_edit_{pid_edit}"):
                         fecha_str_edit = str(e_fecha)  # siempre YYYY-MM-DD
                         dup = q("""SELECT id FROM partidos
-                                   WHERE fecha=? AND LOWER(TRIM(rival))=LOWER(TRIM(?)) AND id!=?""",
+                                   WHERE fecha=%s AND LOWER(TRIM(rival))=LOWER(TRIM(%s)) AND id!=%s""",
                                 (fecha_str_edit, e_rival.strip(), pid_edit))
                         if len(dup) > 0:
                             st.error(f"⚠️ Ya existe otro partido el {fecha_str_edit} contra '{e_rival.strip()}' (ID diferente al que editas).")
@@ -2759,7 +2759,7 @@ with TAB_HISTORIAL:
                             # Datos básicos
                             conn.cursor().execute("""UPDATE partidos SET fecha=%s,rival=%s,cancha=%s,goles_favor=%s,
                                            goles_contra=?,costo_arbitraje=?,costo_agua=?,notas=?,informe_arbitral=?
-                                           WHERE id=?""",
+                                           WHERE id=%s""",
                                          (fecha_str_edit, e_rival.strip(), e_cancha,
                                           e_gf, e_gc, e_arb, e_agua, e_notas, e_arbitral, pid_edit))
                             # Participaciones
@@ -2956,20 +2956,20 @@ with TAB_HISTORIAL:
             resultado = "✅ Ganado" if gf > gc else ("🤝 Empate" if gf == gc else "❌ Perdido")
 
             partic = q("""SELECT j.nombre, pa.rol FROM participaciones pa
-                JOIN jugadores j ON pa.jugador_id=j.id WHERE pa.partido_id=?""", (pid,))
+                JOIN jugadores j ON pa.jugador_id=j.id WHERE pa.partido_id=%s""", (pid,))
             tit_str = ", ".join(partic[partic['rol']=='titular']['nombre'].tolist()) or "N/D"
             cam_str = ", ".join(partic[partic['rol']=='cambio']['nombre'].tolist()) or "Ninguno"
 
             tarj = q("""SELECT j.nombre, t.tipo FROM tarjetas t
-                JOIN jugadores j ON t.jugador_id=j.id WHERE t.partido_id=?""", (pid,))
+                JOIN jugadores j ON t.jugador_id=j.id WHERE t.partido_id=%s""", (pid,))
             am_str = ", ".join(tarj[tarj['tipo']=='amarilla']['nombre'].tolist()) or "—"
             ro_str = ", ".join(tarj[tarj['tipo']=='roja']['nombre'].tolist()) or "—"
 
             goles_p = q("""SELECT COALESCE(j.nombre,'Desconocido') as nombre, g.minuto, g.tipo
                 FROM goles g LEFT JOIN jugadores j ON g.jugador_id=j.id
-                WHERE g.partido_id=? ORDER BY g.minuto""", (pid,))
+                WHERE g.partido_id=%s ORDER BY g.minuto""", (pid,))
 
-            pagos_p = q("SELECT COUNT(*) as total, SUM(pagado) as pagaron FROM pagos WHERE partido_id=?", (pid,))
+            pagos_p = q("SELECT COUNT(*) as total, SUM(pagado) as pagaron FROM pagos WHERE partido_id=%s", (pid,))
             total_j = int(pagos_p['total'][0]) if pagos_p['total'][0] else 0
             pagaron = int(pagos_p['pagaron'][0]) if pagos_p['pagaron'][0] else 0
 
@@ -2993,7 +2993,7 @@ with TAB_HISTORIAL:
                                    FROM cambios c
                                    JOIN jugadores js ON c.jugador_sale_id=js.id
                                    JOIN jugadores je ON c.jugador_entra_id=je.id
-                                   WHERE c.partido_id=? ORDER BY c.minuto""", (pid,))
+                                   WHERE c.partido_id=%s ORDER BY c.minuto""", (pid,))
                 if len(cambios_det) > 0:
                     st.markdown("**↔️ Detalles de cambios:**")
                     for _, ch in cambios_det.iterrows():
@@ -3131,7 +3131,7 @@ with TAB_CALENDARIO:
             if st.form_submit_button("📅 Agregar al calendario", type="primary"):
                 if cal_rival.strip():
                     run("""INSERT INTO calendario (fecha,hora,rival,estadio,tipo,notas)
-                           VALUES (?,?,?,?,?,?)""",
+                           VALUES (%s,%s,%s,%s,%s,%s)""",
                         (str(cal_fecha), cal_hora.strip(), cal_rival.strip(),
                          cal_estadio.strip(), cal_tipo, cal_notas.strip()))
                     guardar_db_en_github()
@@ -3153,7 +3153,7 @@ with TAB_CALENDARIO:
                 dc1, dc2 = st.columns(2)
                 with dc1:
                     if st.button("✅ Sí, eliminar", type="primary", key=f"del_cal_yes_{pid_cal}"):
-                        run("DELETE FROM calendario WHERE id=?", (pid_cal,))
+                        run("DELETE FROM calendario WHERE id=%s", (pid_cal,))
                         guardar_db_en_github()
                         st.session_state.pop(key_del_cal, None)
                         st.success("✅ Eliminado del calendario."); st.rerun()
