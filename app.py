@@ -864,9 +864,11 @@ def run(sql, params=()):
     conn.commit()
     release_conn(conn)
 
+@st.cache_data(ttl=30)
 def get_jugadores():
     return q("SELECT * FROM jugadores WHERE activo=1 ORDER BY numero")
 
+@st.cache_data(ttl=30)
 def get_partidos():
     return q("SELECT * FROM partidos ORDER BY id DESC")
 
@@ -919,19 +921,55 @@ def esta_sancionado(jugador_id):
     return ""
 
 def deuda_jugador(jugador_id):
-    """Suma deuda real = monto total - lo que ya pagó (soporta pagos parciales)."""
-    r = q("""SELECT COALESCE(SUM(monto - COALESCE(monto_pagado,0)),0) as d
-             FROM pagos WHERE jugador_id=%s AND pagado=0""", (jugador_id,))
-    d1 = r['d'][0]
-    r2 = q("""SELECT COALESCE(SUM(monto - COALESCE(monto_pagado,0)),0) as d
-              FROM multas WHERE jugador_id=%s AND pagado=0""", (jugador_id,))
-    d2 = r2['d'][0]
-    return d1 + d2
+    r = q("""SELECT
+               COALESCE((SELECT SUM(monto-COALESCE(monto_pagado,0)) FROM pagos
+                         WHERE jugador_id=%s AND pagado=0),0) +
+               COALESCE((SELECT SUM(monto-COALESCE(monto_pagado,0)) FROM multas
+                         WHERE jugador_id=%s AND pagado=0),0) as d""",
+          (jugador_id, jugador_id))
+    return float(r['d'][0] or 0)
 
-# ── Goles ──────────────────────────────────────────────────────────────────────
 def goles_jugador(jugador_id):
     r = q("SELECT COUNT(*) as c FROM goles WHERE jugador_id=%s", (jugador_id,))
-    return r['c'][0]
+    return int(r['c'][0] or 0)
+
+# ── Bulk stats para evitar N queries por jugador ───────────────────────────────
+@st.cache_data(ttl=30)
+def get_all_deudas():
+    """Retorna dict {jugador_id: deuda_total} en una sola query."""
+    r = q("""
+        SELECT jugador_id,
+               COALESCE(SUM(monto - COALESCE(monto_pagado,0)),0) as deuda
+        FROM (
+            SELECT jugador_id, monto, monto_pagado FROM pagos WHERE pagado=0
+            UNION ALL
+            SELECT jugador_id, monto, monto_pagado FROM multas WHERE pagado=0
+        ) t
+        GROUP BY jugador_id
+    """)
+    return {int(row['jugador_id']): float(row['deuda']) for _, row in r.iterrows()}
+
+@st.cache_data(ttl=30)
+def get_all_tarjetas():
+    """Retorna dict {jugador_id: count_amarillas} en una sola query."""
+    r = q("""
+        SELECT jugador_id, COUNT(*) as cnt
+        FROM tarjetas WHERE tipo='amarilla'
+        GROUP BY jugador_id
+    """)
+    return {int(row['jugador_id']): int(row['cnt']) for _, row in r.iterrows()}
+
+@st.cache_data(ttl=30)
+def get_all_sanciones():
+    """Retorna dict {jugador_id: partidos_pendientes} en una sola query."""
+    r = q("""
+        SELECT jugador_id,
+               SUM(partidos_suspension - partidos_cumplidos) as pendientes
+        FROM sanciones
+        WHERE partidos_cumplidos < partidos_suspension
+        GROUP BY jugador_id
+    """)
+    return {int(row['jugador_id']): int(row['pendientes']) for _, row in r.iterrows()}
 
 def eliminar_partido_completo(pid):
     """Elimina un partido y revierte TODOS sus efectos acumulados:
@@ -1247,13 +1285,17 @@ with TAB_INICIO:
 
     st.markdown('<div class="section-header">🚨 ALERTAS DEL PLANTEL</div>', unsafe_allow_html=True)
 
+    # Cargar stats en bulk — una sola query por tipo
+    bulk_deudas    = get_all_deudas()
+    bulk_sanciones = get_all_sanciones()
+    bulk_tarjetas  = get_all_tarjetas()
+
     hay_alertas = False
     for _, j in jugadores.iterrows():
         jid = int(j['id'])
-        sancion = esta_sancionado(jid)
-        deuda = deuda_jugador(jid)
-        amarillas = amarillas_totales(jid)
-        activas = tarjetas_amarillas_activas(jid)
+        sancion  = esta_sancionado(jid)
+        deuda    = bulk_deudas.get(jid, 0.0)
+        activas  = bulk_tarjetas.get(jid, 0) % 5  # activas en ciclo actual
 
         if sancion and "Suspendido" in sancion:
             hay_alertas = True
