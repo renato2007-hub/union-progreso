@@ -828,15 +828,24 @@ with st.sidebar:
 
 # ─── HELPERS ───────────────────────────────────────────────────────────────────
 def q(sql, params=()):
-    """Execute SELECT query, return DataFrame. Converts ? to %s for PostgreSQL."""
+    """Execute SELECT query, return DataFrame."""
+    import decimal
     conn = get_conn()
     sql_pg = sql.replace("?", "%s")
-    # Fix SQLite-specific functions for PostgreSQL
-    sql_pg = sql_pg.replace("CURRENT_DATE", "CURRENT_DATE")
-    sql_pg = sql_pg.replace("CURRENT_DATE", "CURRENT_DATE")
     try:
-        df = pd.read_sql_query(sql_pg, conn, params=params if params else None)
+        cur = conn.cursor()
+        cur.execute(sql_pg, params if params else ())
+        rows = cur.fetchall()
+        col_names = [desc[0] for desc in cur.description] if cur.description else []
         conn.close()
+        if not rows:
+            return pd.DataFrame(columns=col_names)
+        df = pd.DataFrame(rows, columns=col_names)
+        # Convert Decimal to float
+        for col in df.columns:
+            df[col] = df[col].apply(
+                lambda x: float(x) if isinstance(x, decimal.Decimal) else x
+            )
         return df
     except Exception as e:
         conn.close()
