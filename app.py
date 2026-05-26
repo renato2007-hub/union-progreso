@@ -2368,7 +2368,7 @@ if IS_ADMIN:
     with c2:
         st.markdown(f"""<div class="metric-card"><div class="label">⚠️ Total Deudas</div>
             <div class="valor" style="color:#ff7b2e;">${total_deuda:,.0f}</div></div>""", unsafe_allow_html=True)
-    total_gastado = q("SELECT COALESCE(SUM(costo_arbitraje+costo_agua),0) as t FROM partidos")['t'][0]
+    total_gastado = float(q("SELECT COALESCE(SUM(costo_arbitraje+costo_agua),0) as t FROM partidos")['t'][0] or 0)
     with c3:
         st.markdown(f"""<div class="metric-card"><div class="label">💸 Total Gastado</div>
             <div class="valor" style="color:#cc0000;">${total_gastado:,.0f}</div></div>""", unsafe_allow_html=True)
