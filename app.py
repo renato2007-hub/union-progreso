@@ -20,27 +20,7 @@ def get_db_url():
     except Exception:
         return None
 
-@st.cache_resource
-def get_connection_pool():
-    """Persistent connection pool to reduce latency."""
-    try:
-        from psycopg2 import pool
-        url = get_db_url()
-        if not url:
-            return None
-        return pool.SimpleConnectionPool(1, 5, url)
-    except Exception:
-        return None
-
 def get_conn():
-    pool = get_connection_pool()
-    if pool:
-        try:
-            conn = pool.getconn()
-            conn.autocommit = False
-            return conn
-        except Exception:
-            pass
     url = get_db_url()
     if not url:
         st.error("❌ No se encontró SUPABASE_DB_URL en Secrets.")
@@ -48,14 +28,6 @@ def get_conn():
     return psycopg2.connect(url)
 
 def release_conn(conn):
-    """Return connection to pool."""
-    pool = get_connection_pool()
-    if pool:
-        try:
-            pool.putconn(conn)
-            return
-        except Exception:
-            pass
     try:
         conn.close()
     except Exception:
