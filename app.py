@@ -20,13 +20,46 @@ def get_db_url():
     except Exception:
         return None
 
+@st.cache_resource
+def get_connection_pool():
+    """Persistent connection pool to reduce latency."""
+    try:
+        from psycopg2 import pool
+        url = get_db_url()
+        if not url:
+            return None
+        return pool.SimpleConnectionPool(1, 5, url)
+    except Exception:
+        return None
+
 def get_conn():
+    pool = get_connection_pool()
+    if pool:
+        try:
+            conn = pool.getconn()
+            conn.autocommit = False
+            return conn
+        except Exception:
+            pass
     url = get_db_url()
     if not url:
         st.error("❌ No se encontró SUPABASE_DB_URL en Secrets.")
         st.stop()
-    conn = psycopg2.connect(url)
-    return conn
+    return psycopg2.connect(url)
+
+def release_conn(conn):
+    """Return connection to pool."""
+    pool = get_connection_pool()
+    if pool:
+        try:
+            pool.putconn(conn)
+            return
+        except Exception:
+            pass
+    try:
+        conn.close()
+    except Exception:
+        pass
 
 # ─── PDF GENERATOR ─────────────────────────────────────────────────────────────
 def generar_pdf_partido(pid):
@@ -737,7 +770,7 @@ def _init_db_old():
         except Exception:
             pass  # columna ya existe
     conn.commit()
-    conn.close()
+    release_conn(conn)
 
 init_db()
 
@@ -837,29 +870,27 @@ def q(sql, params=()):
         cur.execute(sql_pg, params if params else ())
         rows = cur.fetchall()
         col_names = [desc[0] for desc in cur.description] if cur.description else []
-        conn.close()
+        release_conn(conn)
         if not rows:
             return pd.DataFrame(columns=col_names)
         df = pd.DataFrame([dict(r) for r in rows])
-        # Convert Decimal to float
         for col in df.columns:
             df[col] = df[col].apply(
                 lambda x: float(x) if isinstance(x, decimal.Decimal) else x
             )
         return df
     except Exception as e:
-        conn.close()
+        release_conn(conn)
         raise e
 
 def run(sql, params=()):
-    """Execute INSERT/UPDATE/DELETE. Converts %s to %s for PostgreSQL."""
+    """Execute INSERT/UPDATE/DELETE."""
     conn = get_conn()
     sql_pg = sql.replace("?", "%s")
-    sql_pg = sql_pg.replace("CURRENT_DATE", "CURRENT_DATE")
     cur = conn.cursor()
     cur.execute(sql_pg, params if params else ())
     conn.commit()
-    conn.close()
+    release_conn(conn)
 
 def get_jugadores():
     return q("SELECT * FROM jugadores WHERE activo=1 ORDER BY numero")
@@ -971,7 +1002,7 @@ def eliminar_partido_completo(pid):
 
     conn.cursor().execute("DELETE FROM partidos WHERE id=%s", (pid,))
     conn.commit()
-    conn.close()
+    release_conn(conn)
 
 # ─── CUSTOM CSS ────────────────────────────────────────────────────────────────
 st.markdown("""
@@ -1609,7 +1640,7 @@ if IS_ADMIN:
                 if f1_arb + f1_agua > 0:
                     c.execute("INSERT INTO caja (partido_id,concepto,monto,fecha) VALUES (%s,%s,%s,%s)",
                               (pid, f"Gastos partido vs {f1_rival.strip()}", -(f1_arb+f1_agua), str(f1_fecha)))
-                conn.commit(); conn.close()
+                conn.commit(); release_conn(conn)
                 guardar_db_en_github()
                 # Limpiar borrador y guardar el pid del partido recién creado
                 st.session_state['f1_draft'] = {}
@@ -1975,7 +2006,7 @@ if IS_ADMIN:
                                   (jid, pid_f2, int(n_part_ro)))
                         sanciones_gen.append(f"🟥 {t['jugador']}: {int(n_part_ro)} partido(s)")
 
-                conn.commit(); conn.close()
+                conn.commit(); release_conn(conn)
                 guardar_db_en_github()
                 # Limpiar session_state de tarjetas de este partido
                 if key_tarj in st.session_state:
@@ -2288,7 +2319,7 @@ if IS_ADMIN:
                         (pid_f3, f3_concepto.strip(), f3_monto_extra, str(date.today())))
                     cambios += 1
 
-                conn.commit(); conn.close()
+                conn.commit(); release_conn(conn)
                 guardar_db_en_github()
                 st.success(f"✅ {cambios} cobro(s) registrado(s). Los valores no pagados quedan como deuda acumulada.") if cambios else st.info("Sin cambios.")
                 if cambios: st.rerun()
@@ -2819,7 +2850,7 @@ with TAB_HISTORIAL:
                                 saldado = np >= nm - 0.001
                                 conn.cursor().execute("UPDATE multas SET monto=%s, monto_pagado=%s, pagado=%s WHERE id=%s",
                                              (nm, np, int(saldado), int(m['id'])))
-                            conn.commit(); conn.close()
+                            conn.commit(); release_conn(conn)
                             # Limpiar session_state del editor
                             for k in [key_goles_edit, key_tarj_edit]:
                                 st.session_state.pop(k, None)
