@@ -2908,8 +2908,8 @@ with TAB_HISTORIAL:
             LEFT JOIN goles g ON j.id=g.jugador_id
             WHERE j.activo=1
             GROUP BY j.id, j.nombre, j.posicion
-            HAVING goles > 0
-            ORDER BY goles DESC
+            HAVING COUNT(g.id) > 0
+            ORDER BY COUNT(g.id) DESC
         """)
         if len(goleadores_df) > 0:
             for rank, (_, row) in enumerate(goleadores_df.iterrows(), 1):
