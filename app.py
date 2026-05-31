@@ -1434,7 +1434,10 @@ if IS_ADMIN:
             c1, c2 = st.columns(2)
             with c1:
                 n_nombre = st.text_input("Nombre", value=j_sel['nombre'])
-                n_num = st.number_input("Número", min_value=1, max_value=99, value=int(j_sel['numero']) if j_sel['numero'] else 1)
+                import math
+                num_val = j_sel['numero']
+                n_num = st.number_input("Número", min_value=1, max_value=99,
+                    value=int(num_val) if num_val and not (isinstance(num_val, float) and math.isnan(num_val)) else 1)
             with c2:
                 posiciones = ["Portero", "Defensa", "Mediocampista", "Delantero"]
                 pos_idx = posiciones.index(j_sel['posicion']) if j_sel['posicion'] in posiciones else 0
