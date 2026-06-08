@@ -789,7 +789,7 @@ def login_screen():
             if u in USUARIOS and USUARIOS[u]["password"] == password:
                 st.session_state["usuario"] = u
                 st.session_state["rol"]     = USUARIOS[u]["rol"]
-                st.rerun()
+                st.cache_data.clear(); st.rerun()
             else:
                 st.error("Usuario o contraseña incorrectos.")
 
@@ -804,7 +804,7 @@ with st.sidebar:
     st.markdown(f"**{icono_rol}** — {st.session_state['usuario']}")
     if st.button("🚪 Cerrar sesión"):
         for k in ["usuario", "rol"]: st.session_state.pop(k, None)
-        st.rerun()
+        st.cache_data.clear(); st.rerun()
     if IS_ADMIN:
         st.markdown("---")
         st.markdown("**⚙️ Administración**")
@@ -827,15 +827,15 @@ with st.sidebar:
                     for k in list(st.session_state.keys()):
                         if k not in keys_keep: del st.session_state[k]
                     st.success("✅ Datos eliminados. Jugadores conservados.")
-                    st.rerun()
+                    st.cache_data.clear(); st.rerun()
             with col_no:
                 if st.button("❌ Cancelar"):
                     st.session_state[key_confirm_reset] = False
-                    st.rerun()
+                    st.cache_data.clear(); st.rerun()
         else:
             if st.button("🗑️ Borrar datos de prueba"):
                 st.session_state[key_confirm_reset] = True
-                st.rerun()
+                st.cache_data.clear(); st.rerun()
 
 # ─── HELPERS ───────────────────────────────────────────────────────────────────
 def q(sql, params=()):
@@ -1441,7 +1441,7 @@ if IS_ADMIN:
                     (nombre, numero, posicion, int(exento_arb), int(exento_uni)))
                 guardar_db_en_github()
                 st.success(f"✅ {nombre} agregado al plantel")
-                st.rerun()
+                st.cache_data.clear(); st.rerun()
 
     # Editar/desactivar jugador
     st.markdown('<div class="section-header">✏️ EDITAR JUGADOR</div>', unsafe_allow_html=True)
@@ -1474,13 +1474,13 @@ if IS_ADMIN:
                         (n_nombre, n_num, n_pos, int(n_exarb), int(n_exuni), int(j_sel['id'])))
                     guardar_db_en_github()
                     st.success("✅ Jugador actualizado")
-                    st.rerun()
+                    st.cache_data.clear(); st.rerun()
             with col_d:
                 if st.form_submit_button("🗑️ Desactivar jugador"):
                     run("UPDATE jugadores SET activo=0 WHERE id=%s", (int(j_sel['id']),))
                     guardar_db_en_github()
                     st.warning(f"Jugador {j_sel['nombre']} desactivado")
-                    st.rerun()
+                    st.cache_data.clear(); st.rerun()
 
 # ══════════════════════════════════════════════════════════════════════════════
 # TAB 3 — PARTIDO (4 FASES)
@@ -1523,7 +1523,7 @@ if IS_ADMIN:
             for k in keys_limpiar:
                 del st.session_state[k]
             st.success("✅ Formulario limpio. Ingresa los datos del nuevo partido.")
-            st.rerun()
+            st.cache_data.clear(); st.rerun()
     with col_info:
         if partidos_list is not None and len(partidos_list) > 0:
             ult = partidos_list.iloc[0]
@@ -1719,7 +1719,7 @@ if IS_ADMIN:
                         del st.session_state[k]
                 st.success(f"✅ Alineación guardada — {n_tit} titulares. "
                            f"Fase 2 ya apunta a este partido.")
-                st.rerun()
+                st.cache_data.clear(); st.rerun()
 
     st.markdown("---")
 
@@ -1879,7 +1879,7 @@ if IS_ADMIN:
                 for idx in reversed(to_remove):
                     st.session_state[key_tarj].pop(idx)
                 if to_remove:
-                    st.rerun()
+                    st.cache_data.clear(); st.rerun()
 
                 # Detectar y mostrar dobles amarillas
                 from collections import Counter
@@ -1912,7 +1912,7 @@ if IS_ADMIN:
                         "tipo":    st.session_state.get(f"ntt_{pid_f2}", nueva_tarj_tipo),
                         "minuto":  min_capturado
                     })
-                    st.rerun()
+                    st.cache_data.clear(); st.rerun()
 
             f2_notas = st.text_area("📝 Notas del partido", height=60,
                                     value=str(p_data['notas'] or ""), key="f2_notas")
@@ -2084,7 +2084,7 @@ if IS_ADMIN:
                 if sanciones_gen: msg += f" Sanciones: {' | '.join(sanciones_gen)}"
                 msg += " Ve a Fase 3 para registrar los cobros."
                 st.success(msg)
-                st.rerun()
+                st.cache_data.clear(); st.rerun()
 
     st.markdown("---")
 
@@ -2124,7 +2124,7 @@ if IS_ADMIN:
                             "INSERT INTO pagos (partido_id,jugador_id,monto,pagado) VALUES (%s,%s,%s,0)",
                             (pid_f3, int(sp['jugador_id']), monto_cuota_f3))
                     conn_fix.commit(); conn_fix.close()
-                    st.rerun()
+                    st.cache_data.clear(); st.rerun()
 
             # ── Lista completa de jugadores a cobrar ──────────────────────
             # Incluye: todos con cuota + todos con multa pendiente (aunque sean exentos)
@@ -2390,7 +2390,7 @@ if IS_ADMIN:
                 conn.commit(); release_conn(conn)
                 guardar_db_en_github()
                 st.success(f"✅ {cambios} cobro(s) registrado(s). Los valores no pagados quedan como deuda acumulada.") if cambios else st.info("Sin cambios.")
-                if cambios: st.rerun()
+                if cambios: st.cache_data.clear(); st.rerun()
 
     st.markdown("---")
 
@@ -2445,12 +2445,12 @@ if IS_ADMIN:
                             st.success(f"✅ {s['nombre']} ha cumplido su suspensión. Ya puede jugar.")
                         else:
                             st.info(f"Registrado. Le falta {total_s - nuevo_cumplido} partido(s) más.")
-                        st.rerun()
+                        st.cache_data.clear(); st.rerun()
                     if st.button("❌ Cancelar", key=f"canc_{s['id']}"):
-                        st.session_state[kc] = False; st.rerun()
+                        st.session_state[kc] = False; st.cache_data.clear(); st.rerun()
                 else:
                     if st.button(f"⬜ Marcar cumplida", key=f"mc_{s['id']}"):
-                        st.session_state[kc] = True; st.rerun()
+                        st.session_state[kc] = True; st.cache_data.clear(); st.rerun()
 
     # Sanciones recientemente cumplidas (útil para verificar)
     sanciones_ok = q("""
@@ -2506,7 +2506,7 @@ if IS_ADMIN:
             if concepto_caja:
                 run("INSERT INTO caja (partido_id,concepto,monto,fecha) VALUES (%s,%s,%s,%s)",
                     (None, concepto_caja, monto_caja, str(fecha_caja)))
-                st.success("✅ Movimiento registrado"); st.rerun()
+                st.success("✅ Movimiento registrado"); st.cache_data.clear(); st.rerun()
 
     st.markdown('<div class="section-header">💸 DEUDAS POR JUGADOR</div>', unsafe_allow_html=True)
     jugadores = get_jugadores()
@@ -2759,11 +2759,11 @@ with TAB_HISTORIAL:
                             to_del_g.append(gi)
                 for gi in reversed(to_del_g):
                     goles_edit_list.pop(gi)
-                if to_del_g: st.rerun()
+                if to_del_g: st.cache_data.clear(); st.rerun()
 
                 if st.button("➕ Agregar gol", key=f"eg_add_{pid_edit}"):
                     goles_edit_list.append({"nombre": nombres_all[0] if nombres_all else "Desconocido", "minuto": 1, "tipo": "normal"})
-                    st.rerun()
+                    st.cache_data.clear(); st.rerun()
 
                 # ── Tarjetas ──────────────────────────────────────────────
                 st.markdown("**🟨 Tarjetas**")
@@ -2797,11 +2797,11 @@ with TAB_HISTORIAL:
                             to_del_t.append(ti)
                 for ti in reversed(to_del_t):
                     tarj_edit_list.pop(ti)
-                if to_del_t: st.rerun()
+                if to_del_t: st.cache_data.clear(); st.rerun()
 
                 if st.button("➕ Agregar tarjeta", key=f"et_add_{pid_edit}"):
                     tarj_edit_list.append({"nombre": nombres_all[0] if nombres_all else "", "tipo": "amarilla"})
-                    st.rerun()
+                    st.cache_data.clear(); st.rerun()
 
                 # ── Cobros ────────────────────────────────────────────────
                 st.markdown("**💰 Cobros — cuotas de arbitraje**")
@@ -2924,7 +2924,7 @@ with TAB_HISTORIAL:
                             for k in [key_goles_edit, key_tarj_edit]:
                                 st.session_state.pop(k, None)
                             guardar_db_en_github()
-                            st.success("✅ Partido actualizado completamente."); st.rerun()
+                            st.success("✅ Partido actualizado completamente."); st.cache_data.clear(); st.rerun()
                 with e_col2:
                     key_confirm_del = f"confirm_del_{pid_edit}"
                     if st.session_state.get(key_confirm_del):
@@ -2934,15 +2934,15 @@ with TAB_HISTORIAL:
                             if st.button("✅ Sí, eliminar", type="primary", key=f"del_confirm_yes_{pid_edit}"):
                                 eliminar_partido_completo(pid_edit)
                                 st.session_state.pop(key_confirm_del, None)
-                                st.success("✅ Partido eliminado. Deudas pendientes restablecidas."); st.rerun()
+                                st.success("✅ Partido eliminado. Deudas pendientes restablecidas."); st.cache_data.clear(); st.rerun()
                         with cd2:
                             if st.button("❌ Cancelar", key=f"del_confirm_no_{pid_edit}"):
                                 st.session_state.pop(key_confirm_del, None)
-                                st.rerun()
+                                st.cache_data.clear(); st.rerun()
                     else:
                         if st.button("🗑️ Eliminar este partido", key=f"del_edit_{pid_edit}"):
                             st.session_state[key_confirm_del] = True
-                            st.rerun()
+                            st.cache_data.clear(); st.rerun()
 
             st.markdown("---")
         st.markdown('<div class="section-header">📈 ESTADÍSTICAS GENERALES</div>', unsafe_allow_html=True)
@@ -3121,15 +3121,15 @@ with TAB_HISTORIAL:
                             if st.button("✅ Sí, eliminar", type="primary", key=f"del_hist_yes_{pid}"):
                                 eliminar_partido_completo(pid)
                                 st.session_state.pop(key_del_hist, None)
-                                st.success("✅ Partido eliminado. Deudas pendientes restablecidas."); st.rerun()
+                                st.success("✅ Partido eliminado. Deudas pendientes restablecidas."); st.cache_data.clear(); st.rerun()
                         with dh2:
                             if st.button("❌ Cancelar", key=f"del_hist_no_{pid}"):
                                 st.session_state.pop(key_del_hist, None)
-                                st.rerun()
+                                st.cache_data.clear(); st.rerun()
                     else:
                         if st.button("🗑️ Eliminar partido", key=f"del_{pid}"):
                             st.session_state[key_del_hist] = True
-                            st.rerun()
+                            st.cache_data.clear(); st.rerun()
 
                     # Botón de descarga PDF — solo admin
                     pdf_bytes = generar_pdf_partido(pid)
@@ -3242,7 +3242,7 @@ with TAB_CALENDARIO:
                          cal_estadio.strip(), cal_tipo, cal_notas.strip()))
                     guardar_db_en_github()
                     st.success(f"✅ Partido vs {cal_rival.strip()} agregado al calendario.")
-                    st.rerun()
+                    st.cache_data.clear(); st.rerun()
                 else:
                     st.error("⚠️ El nombre del rival es obligatorio.")
 
@@ -3262,10 +3262,10 @@ with TAB_CALENDARIO:
                         run("DELETE FROM calendario WHERE id=%s", (pid_cal,))
                         guardar_db_en_github()
                         st.session_state.pop(key_del_cal, None)
-                        st.success("✅ Eliminado del calendario."); st.rerun()
+                        st.success("✅ Eliminado del calendario."); st.cache_data.clear(); st.rerun()
                 with dc2:
                     if st.button("❌ Cancelar", key=f"del_cal_no_{pid_cal}"):
-                        st.session_state.pop(key_del_cal, None); st.rerun()
+                        st.session_state.pop(key_del_cal, None); st.cache_data.clear(); st.rerun()
             else:
                 if st.button("🗑️ Eliminar partido seleccionado", key=f"del_cal_btn_{pid_cal}"):
-                    st.session_state[key_del_cal] = True; st.rerun()
+                    st.session_state[key_del_cal] = True; st.cache_data.clear(); st.rerun()
