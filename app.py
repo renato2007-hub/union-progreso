@@ -933,7 +933,14 @@ def get_stats_bulk():
     """)
     goles = {int(r['jugador_id']): int(r['total']) for _, r in goles_df.iterrows()}
 
-    return deudas, tarj_df, sanc_df, goles
+    # Rojas
+    rojas_df = q("""
+        SELECT jugador_id, COUNT(*) as total
+        FROM tarjetas WHERE tipo='roja' GROUP BY jugador_id
+    """)
+    rojas = {int(r['jugador_id']): int(r['total']) for _, r in rojas_df.iterrows()}
+
+    return deudas, tarj_df, sanc_df, goles, rojas
 
 def _calc_amarillas_activas(jugador_id, tarj_df):
     """Calcula amarillas simples activas desde el DataFrame bulk."""
@@ -951,36 +958,36 @@ def _calc_amarillas_activas(jugador_id, tarj_df):
     return total_amarillas, activas
 
 def amarillas_totales(jugador_id):
-    _, tarj_df, _, _ = get_stats_bulk()
+    _, tarj_df, _, _, _ = get_stats_bulk()
     total, _ = _calc_amarillas_activas(jugador_id, tarj_df)
     return total
 
 def amarillas_simples_total(jugador_id):
-    _, tarj_df, _, _ = get_stats_bulk()
+    _, tarj_df, _, _, _ = get_stats_bulk()
     if len(tarj_df) == 0: return 0
     jdf = tarj_df[tarj_df['jugador_id']==jugador_id]
     return int(jdf[jdf['cnt']==1]['cnt'].sum())
 
 def tarjetas_amarillas_activas(jugador_id):
-    _, tarj_df, _, _ = get_stats_bulk()
+    _, tarj_df, _, _, _ = get_stats_bulk()
     _, activas = _calc_amarillas_activas(jugador_id, tarj_df)
     return activas
 
 def partidos_doble_amarilla(jugador_id):
-    _, tarj_df, _, _ = get_stats_bulk()
+    _, tarj_df, _, _, _ = get_stats_bulk()
     if len(tarj_df) == 0: return 0
     jdf = tarj_df[tarj_df['jugador_id']==jugador_id]
     return int((jdf['cnt']>=2).sum())
 
 def sanciones_pendientes(jugador_id):
-    _, _, sanc_df, _ = get_stats_bulk()
+    _, _, sanc_df, _, _ = get_stats_bulk()
     if len(sanc_df) == 0: return 0
     jdf = sanc_df[sanc_df['jugador_id']==jugador_id]
     return int(jdf['pendientes'].sum()) if len(jdf) > 0 else 0
 
 def esta_sancionado(jugador_id):
-    _, _, sanc_df, _ = get_stats_bulk()
-    _, tarj_df, _, _ = get_stats_bulk()
+    _, _, sanc_df, _, _ = get_stats_bulk()
+    _, tarj_df, _, _, _ = get_stats_bulk()
     _, activas = _calc_amarillas_activas(jugador_id, tarj_df)
     if len(sanc_df) > 0:
         jdf = sanc_df[sanc_df['jugador_id']==jugador_id]
@@ -993,24 +1000,24 @@ def esta_sancionado(jugador_id):
     return ""
 
 def deuda_jugador(jugador_id):
-    deudas, _, _, _ = get_stats_bulk()
+    deudas, _, _, _, _ = get_stats_bulk()
     return deudas.get(jugador_id, 0.0)
 
 def goles_jugador(jugador_id):
-    _, _, _, goles = get_stats_bulk()
+    _, _, _, goles, _ = get_stats_bulk()
     return goles.get(jugador_id, 0)
 
 def get_all_deudas():
-    deudas, _, _, _ = get_stats_bulk()
+    deudas, _, _, _, _ = get_stats_bulk()
     return deudas
 
 def get_all_sanciones():
-    _, _, sanc_df, _ = get_stats_bulk()
+    _, _, sanc_df, _, _ = get_stats_bulk()
     if len(sanc_df) == 0: return {}
     return {int(r['jugador_id']): int(r['pendientes']) for _, r in sanc_df.iterrows()}
 
 def get_all_tarjetas():
-    _, tarj_df, _, _ = get_stats_bulk()
+    _, tarj_df, _, _, _ = get_stats_bulk()
     if len(tarj_df) == 0: return {}
     return {int(r['jugador_id']): int(r['cnt']) for _, r in tarj_df.iterrows()}
 
@@ -1382,7 +1389,8 @@ if IS_ADMIN:
         jid = int(j['id'])
         amarillas = amarillas_totales(jid)
         activas = tarjetas_amarillas_activas(jid)
-        rojas = q("SELECT COUNT(*) as c FROM tarjetas WHERE jugador_id=%s AND tipo='roja'", (jid,))['c'][0]
+        _, _, _, _, _rojas_bulk = get_stats_bulk()
+        rojas = _rojas_bulk.get(jid, 0)
         rojas_pend = sanciones_pendientes(jid)
         deuda = deuda_jugador(jid)
         sancion = esta_sancionado(jid)
@@ -2546,7 +2554,8 @@ with TAB_DISCIPLINA:
         am_t = amarillas_totales(jid)
         am_c = tarjetas_amarillas_activas(jid)
         am_d = partidos_doble_amarilla(jid)
-        ro_t = q("SELECT COUNT(*) as c FROM tarjetas WHERE jugador_id=%s AND tipo='roja'", (jid,))['c'][0]
+        _, _, _, _, _rojas_bulk2 = get_stats_bulk()
+        ro_t = _rojas_bulk2.get(jid, 0)
         pend = sanciones_pendientes(jid)
         sanc = esta_sancionado(jid)
         estado = sanc if sanc else "✅ Disponible"
