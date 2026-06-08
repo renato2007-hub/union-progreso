@@ -844,7 +844,7 @@ def q(sql, params=()):
     sql_pg = sql.replace("?", "%s")
     conn = None
     try:
-        conn = psycopg2.connect(get_db_url())
+        conn = get_conn()
         cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
         cur.execute(sql_pg, params if params else ())
         rows = cur.fetchall()
@@ -870,7 +870,7 @@ def run(sql, params=()):
     sql_pg = sql.replace("?", "%s")
     conn = None
     try:
-        conn = psycopg2.connect(get_db_url())
+        conn = get_conn()
         cur = conn.cursor()
         cur.execute(sql_pg, params if params else ())
         conn.commit()
