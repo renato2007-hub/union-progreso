@@ -21,7 +21,19 @@ def get_db_url():
         return None
 
 def get_conn():
-    return psycopg2.connect(get_db_url())
+    url = get_db_url()
+    if not url:
+        st.error("❌ No se encontró SUPABASE_DB_URL en Secrets.")
+        st.stop()
+    conn = psycopg2.connect(
+        url,
+        connect_timeout=10,
+        keepalives=1,
+        keepalives_idle=30,
+        keepalives_interval=10,
+        keepalives_count=3
+    )
+    return conn
 
 def release_conn(conn):
     try: conn.close()
