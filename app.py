@@ -841,48 +841,55 @@ with st.sidebar:
 
 # ─── HELPERS ───────────────────────────────────────────────────────────────────
 def q(sql, params=()):
-    """Execute SELECT query, return DataFrame."""
-    import decimal
+    """Execute SELECT query with retry logic."""
+    import decimal, time
     sql_pg = sql.replace("?", "%s")
-    conn = None
-    try:
-        conn = get_conn()
-        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-        cur.execute(sql_pg, params if params else ())
-        rows = cur.fetchall()
-        col_names = [desc[0] for desc in cur.description] if cur.description else []
-        conn.close()
+    for intento in range(3):
         conn = None
-        if not rows:
-            return pd.DataFrame(columns=col_names)
-        df = pd.DataFrame([dict(r) for r in rows])
-        for col in df.columns:
-            df[col] = df[col].apply(
-                lambda x: float(x) if isinstance(x, decimal.Decimal) else x
-            )
-        return df
-    except Exception as e:
-        if conn:
-            try: conn.close()
-            except: pass
-        raise e
+        try:
+            conn = get_conn()
+            cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            cur.execute(sql_pg, params if params else ())
+            rows = cur.fetchall()
+            col_names = [desc[0] for desc in cur.description] if cur.description else []
+            conn.close()
+            if not rows:
+                return pd.DataFrame(columns=col_names)
+            df = pd.DataFrame([dict(r) for r in rows])
+            for col in df.columns:
+                df[col] = df[col].apply(
+                    lambda x: float(x) if isinstance(x, decimal.Decimal) else x)
+            return df
+        except Exception as e:
+            if conn:
+                try: conn.close()
+                except: pass
+            if intento < 2:
+                time.sleep(1)
+            else:
+                raise e
 
 def run(sql, params=()):
-    """Execute INSERT/UPDATE/DELETE."""
+    """Execute INSERT/UPDATE/DELETE with retry logic."""
+    import time
     sql_pg = sql.replace("?", "%s")
-    conn = None
-    try:
-        conn = get_conn()
-        cur = conn.cursor()
-        cur.execute(sql_pg, params if params else ())
-        conn.commit()
-        conn.close()
+    for intento in range(3):
         conn = None
-    except Exception as e:
-        if conn:
-            try: conn.rollback(); conn.close()
-            except: pass
-        raise e
+        try:
+            conn = get_conn()
+            cur = conn.cursor()
+            cur.execute(sql_pg, params if params else ())
+            conn.commit()
+            conn.close()
+            return
+        except Exception as e:
+            if conn:
+                try: conn.rollback(); conn.close()
+                except: pass
+            if intento < 2:
+                time.sleep(1)
+            else:
+                raise e
 
 @st.cache_data(ttl=30)
 def get_jugadores():
