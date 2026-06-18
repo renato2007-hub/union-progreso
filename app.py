@@ -2855,80 +2855,89 @@ with TAB_HISTORIAL:
                 e_col1, e_col2 = st.columns(2)
                 with e_col1:
                     if st.button("💾 Guardar todos los cambios", type="primary", key=f"btn_edit_{pid_edit}"):
-                        fecha_str_edit = str(e_fecha)  # siempre YYYY-MM-DD
+                        fecha_str_edit = str(e_fecha)
+                        pid_edit_int = int(pid_edit)
                         dup = q("""SELECT id FROM partidos
                                    WHERE fecha=%s AND LOWER(TRIM(rival))=LOWER(TRIM(%s)) AND id!=%s""",
-                                (fecha_str_edit, e_rival.strip(), pid_edit))
+                                (fecha_str_edit, e_rival.strip(), pid_edit_int))
                         if len(dup) > 0:
-                            st.error(f"⚠️ Ya existe otro partido el {fecha_str_edit} contra '{e_rival.strip()}' (ID diferente al que editas).")
+                            st.error(f"⚠️ Ya existe otro partido el {fecha_str_edit} contra '{e_rival.strip()}'.")
                         else:
-                            conn = get_conn()
-                            cur = conn.cursor()
-                            # Datos básicos
-                            cur.execute("""UPDATE partidos SET fecha=%s,rival=%s,cancha=%s,goles_favor=%s,
-                                           goles_contra=%s,costo_arbitraje=%s,costo_agua=%s,notas=%s,informe_arbitral=%s
-                                           WHERE id=%s""",
-                                         (fecha_str_edit, e_rival.strip(), e_cancha,
-                                          e_gf, e_gc, e_arb, e_agua, e_notas, e_arbitral, pid_edit))
-                            # Participaciones
-                            cur.execute("DELETE FROM participaciones WHERE partido_id=%s", (pid_edit,))
-                            for nombre in e_titulares:
-                                rows = jugadores_all[jugadores_all['nombre']==nombre]
-                                if len(rows)>0:
-                                    cur.execute("INSERT INTO participaciones (partido_id,jugador_id,rol) VALUES (%s,%s,%s)",
-                                                 (pid_edit, int(rows.iloc[0]['id']), 'titular'))
-                            for nombre in e_cambios:
-                                rows = jugadores_all[jugadores_all['nombre']==nombre]
-                                if len(rows)>0:
-                                    cur.execute("INSERT INTO participaciones (partido_id,jugador_id,rol) VALUES (%s,%s,%s)",
-                                                 (pid_edit, int(rows.iloc[0]['id']), 'cambio'))
-                            # Goles
-                            cur.execute("DELETE FROM goles WHERE partido_id=%s", (pid_edit,))
-                            for g in st.session_state.get(key_goles_edit, []):
-                                if g['nombre'] == "Desconocido / propia puerta":
-                                    cur.execute("INSERT INTO goles (partido_id,jugador_id,minuto,tipo) VALUES (%s,NULL,%s,%s)",
-                                                 (pid_edit, g['minuto'], 'desconocido'))
-                                else:
-                                    rows = jugadores_all[jugadores_all['nombre']==g['nombre']]
+                            conn = None
+                            try:
+                                conn = get_conn()
+                                cur = conn.cursor()
+                                # Datos básicos
+                                cur.execute("""UPDATE partidos SET fecha=%s,rival=%s,cancha=%s,goles_favor=%s,
+                                               goles_contra=%s,costo_arbitraje=%s,costo_agua=%s,notas=%s,informe_arbitral=%s
+                                               WHERE id=%s""",
+                                             (fecha_str_edit, e_rival.strip(), e_cancha,
+                                              e_gf, e_gc, e_arb, e_agua, e_notas, e_arbitral, pid_edit_int))
+                                # Participaciones
+                                cur.execute("DELETE FROM participaciones WHERE partido_id=%s", (pid_edit_int,))
+                                for nombre in e_titulares:
+                                    rows = jugadores_all[jugadores_all['nombre']==nombre]
                                     if len(rows)>0:
-                                        cur.execute("INSERT INTO goles (partido_id,jugador_id,minuto,tipo) VALUES (%s,%s,%s,%s)",
-                                                     (pid_edit, int(rows.iloc[0]['id']), g['minuto'], g['tipo']))
-                            # Tarjetas
-                            cur.execute("DELETE FROM tarjetas WHERE partido_id=%s", (pid_edit,))
-                            for t in st.session_state.get(key_tarj_edit, []):
-                                rows = jugadores_all[jugadores_all['nombre']==t['nombre']]
-                                if len(rows)>0:
-                                    cur.execute("INSERT INTO tarjetas (partido_id,jugador_id,tipo,cumplida) VALUES (%s,%s,%s,0)",
-                                                 (pid_edit, int(rows.iloc[0]['id']), t['tipo']))
-                            # Caja gastos
-                            cur.execute("DELETE FROM caja WHERE partido_id=%s AND concepto LIKE 'Gastos partido%'",
-                                         (pid_edit,))
-                            if e_arb + e_agua > 0:
-                                cur.execute("INSERT INTO caja (partido_id,concepto,monto,fecha) VALUES (%s,%s,%s,%s)",
-                                             (pid_edit, f"Gastos partido vs {e_rival.strip()}",
-                                              -(e_arb+e_agua), str(e_fecha)))
-                            # Actualizar cobros (pagos)
-                            if len(pagos_edit) > 0:
-                                for _, pg in pagos_edit.iterrows():
-                                    nm = st.session_state.get(f"ep_monto_{pid_edit}_{pg['id']}", float(pg['monto']))
-                                    np = st.session_state.get(f"ep_pago_{pid_edit}_{pg['id']}", float(pg['monto_pagado']))
-                                    saldado = np >= nm - 0.001
-                                    cur.execute("UPDATE pagos SET monto=%s, monto_pagado=%s, pagado=%s WHERE id=%s",
-                                                 (nm, np, int(saldado), int(pg['id'])))
-                            # Actualizar multas
-                            if len(multas_edit) > 0:
-                                for _, m in multas_edit.iterrows():
-                                    nm = st.session_state.get(f"em_monto_{pid_edit}_{m['id']}", float(m['monto']))
-                                    np = st.session_state.get(f"em_pago_{pid_edit}_{m['id']}", float(m['monto_pagado']))
-                                    saldado = np >= nm - 0.001
-                                    cur.execute("UPDATE multas SET monto=%s, monto_pagado=%s, pagado=%s WHERE id=%s",
-                                                 (nm, np, int(saldado), int(m['id'])))
-                            conn.commit(); release_conn(conn)
-                            # Limpiar session_state del editor
-                            for k in [key_goles_edit, key_tarj_edit]:
-                                st.session_state.pop(k, None)
-                            guardar_db_en_github()
-                            st.success("✅ Partido actualizado completamente."); st.cache_data.clear(); st.rerun()
+                                        cur.execute("INSERT INTO participaciones (partido_id,jugador_id,rol) VALUES (%s,%s,%s)",
+                                                     (pid_edit_int, int(rows.iloc[0]['id']), 'titular'))
+                                for nombre in e_cambios:
+                                    rows = jugadores_all[jugadores_all['nombre']==nombre]
+                                    if len(rows)>0:
+                                        cur.execute("INSERT INTO participaciones (partido_id,jugador_id,rol) VALUES (%s,%s,%s)",
+                                                     (pid_edit_int, int(rows.iloc[0]['id']), 'cambio'))
+                                # Goles
+                                cur.execute("DELETE FROM goles WHERE partido_id=%s", (pid_edit_int,))
+                                for g in st.session_state.get(key_goles_edit, []):
+                                    if g['nombre'] == "Desconocido / propia puerta":
+                                        cur.execute("INSERT INTO goles (partido_id,jugador_id,minuto,tipo) VALUES (%s,NULL,%s,%s)",
+                                                     (pid_edit_int, g['minuto'], 'desconocido'))
+                                    else:
+                                        rows = jugadores_all[jugadores_all['nombre']==g['nombre']]
+                                        if len(rows)>0:
+                                            cur.execute("INSERT INTO goles (partido_id,jugador_id,minuto,tipo) VALUES (%s,%s,%s,%s)",
+                                                         (pid_edit_int, int(rows.iloc[0]['id']), g['minuto'], g['tipo']))
+                                # Tarjetas
+                                cur.execute("DELETE FROM tarjetas WHERE partido_id=%s", (pid_edit_int,))
+                                for t in st.session_state.get(key_tarj_edit, []):
+                                    rows = jugadores_all[jugadores_all['nombre']==t['nombre']]
+                                    if len(rows)>0:
+                                        cur.execute("INSERT INTO tarjetas (partido_id,jugador_id,tipo,cumplida) VALUES (%s,%s,%s,0)",
+                                                     (pid_edit_int, int(rows.iloc[0]['id']), t['tipo']))
+                                # Caja gastos
+                                cur.execute("DELETE FROM caja WHERE partido_id=%s AND concepto LIKE 'Gastos partido%%'",
+                                             (pid_edit_int,))
+                                if e_arb + e_agua > 0:
+                                    cur.execute("INSERT INTO caja (partido_id,concepto,monto,fecha) VALUES (%s,%s,%s,%s)",
+                                                 (pid_edit_int, f"Gastos partido vs {e_rival.strip()}",
+                                                  -(e_arb+e_agua), str(e_fecha)))
+                                # Actualizar cobros (pagos)
+                                if len(pagos_edit) > 0:
+                                    for _, pg in pagos_edit.iterrows():
+                                        nm = st.session_state.get(f"ep_monto_{pid_edit_int}_{pg['id']}", float(pg['monto']))
+                                        np = st.session_state.get(f"ep_pago_{pid_edit_int}_{pg['id']}", float(pg['monto_pagado']))
+                                        saldado = np >= nm - 0.001
+                                        cur.execute("UPDATE pagos SET monto=%s, monto_pagado=%s, pagado=%s WHERE id=%s",
+                                                     (nm, np, int(saldado), int(pg['id'])))
+                                # Actualizar multas
+                                if len(multas_edit) > 0:
+                                    for _, m in multas_edit.iterrows():
+                                        nm = st.session_state.get(f"em_monto_{pid_edit_int}_{m['id']}", float(m['monto']))
+                                        np = st.session_state.get(f"em_pago_{pid_edit_int}_{m['id']}", float(m['monto_pagado']))
+                                        saldado = np >= nm - 0.001
+                                        cur.execute("UPDATE multas SET monto=%s, monto_pagado=%s, pagado=%s WHERE id=%s",
+                                                     (nm, np, int(saldado), int(m['id'])))
+                                conn.commit()
+                                release_conn(conn)
+                                for k in [key_goles_edit, key_tarj_edit]:
+                                    st.session_state.pop(k, None)
+                                guardar_db_en_github()
+                                st.success("✅ Partido actualizado completamente.")
+                                st.cache_data.clear(); st.rerun()
+                            except Exception as ex:
+                                if conn:
+                                    try: conn.rollback(); release_conn(conn)
+                                    except: pass
+                                st.error(f"❌ Error: {ex}")
                 with e_col2:
                     key_confirm_del = f"confirm_del_{pid_edit}"
                     if st.session_state.get(key_confirm_del):
