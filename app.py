@@ -2908,19 +2908,21 @@ with TAB_HISTORIAL:
                                              (pid_edit, f"Gastos partido vs {e_rival.strip()}",
                                               -(e_arb+e_agua), str(e_fecha)))
                             # Actualizar cobros (pagos)
-                            for _, pg in pagos_edit.iterrows():
-                                nm = st.session_state.get(f"ep_monto_{pid_edit}_{pg['id']}", float(pg['monto']))
-                                np = st.session_state.get(f"ep_pago_{pid_edit}_{pg['id']}", float(pg['monto_pagado']))
-                                saldado = np >= nm - 0.001
-                                cur.execute("UPDATE pagos SET monto=%s, monto_pagado=%s, pagado=%s WHERE id=%s",
-                                             (nm, np, int(saldado), int(pg['id'])))
+                            if len(pagos_edit) > 0:
+                                for _, pg in pagos_edit.iterrows():
+                                    nm = st.session_state.get(f"ep_monto_{pid_edit}_{pg['id']}", float(pg['monto']))
+                                    np = st.session_state.get(f"ep_pago_{pid_edit}_{pg['id']}", float(pg['monto_pagado']))
+                                    saldado = np >= nm - 0.001
+                                    cur.execute("UPDATE pagos SET monto=%s, monto_pagado=%s, pagado=%s WHERE id=%s",
+                                                 (nm, np, int(saldado), int(pg['id'])))
                             # Actualizar multas
-                            for _, m in multas_edit.iterrows():
-                                nm = st.session_state.get(f"em_monto_{pid_edit}_{m['id']}", float(m['monto']))
-                                np = st.session_state.get(f"em_pago_{pid_edit}_{m['id']}", float(m['monto_pagado']))
-                                saldado = np >= nm - 0.001
-                                cur.execute("UPDATE multas SET monto=%s, monto_pagado=%s, pagado=%s WHERE id=%s",
-                                             (nm, np, int(saldado), int(m['id'])))
+                            if len(multas_edit) > 0:
+                                for _, m in multas_edit.iterrows():
+                                    nm = st.session_state.get(f"em_monto_{pid_edit}_{m['id']}", float(m['monto']))
+                                    np = st.session_state.get(f"em_pago_{pid_edit}_{m['id']}", float(m['monto_pagado']))
+                                    saldado = np >= nm - 0.001
+                                    cur.execute("UPDATE multas SET monto=%s, monto_pagado=%s, pagado=%s WHERE id=%s",
+                                                 (nm, np, int(saldado), int(m['id'])))
                             conn.commit(); release_conn(conn)
                             # Limpiar session_state del editor
                             for k in [key_goles_edit, key_tarj_edit]:
