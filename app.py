@@ -2306,7 +2306,9 @@ if IS_ADMIN:
                     help="Positivo = ingreso, Negativo = gasto")
 
             if st.button("💾 GUARDAR COBROS", type="primary", key="btn_fase3"):
-                conn = get_conn(); cambios = 0
+                conn = get_conn()
+                cur = conn.cursor()
+                cambios = 0
 
                 # Cuotas con pago — puede pagar más que la deuda del partido actual
                 if len(pagos_df) > 0:
