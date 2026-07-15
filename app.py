@@ -1,3293 +1,462 @@
+# ══════════════════════════════════════════════════════════════════
+# app.py — Punto de entrada OVOMAS Streamlit
+# Panel General + Navegación lateral
+# v2.0 — con persistencia Google Drive
+# ══════════════════════════════════════════════════════════════════
 import streamlit as st
 import pandas as pd
-from datetime import datetime, date
-import json
-import io
-import base64
-import requests
-import psycopg2
-import psycopg2.extras
+import plotly.graph_objects as go
+from datetime import date, datetime, timedelta
 
-# ─── SUPABASE / POSTGRESQL CONNECTION ─────────────────────────────────────────
-def guardar_db_en_github():
-    """Stub — ya no se usa con Supabase."""
-    return True
-
-@st.cache_resource
-def get_db_url():
-    try:
-        return st.secrets["SUPABASE_DB_URL"]
-    except Exception:
-        return None
-
-def get_conn():
-    url = get_db_url()
-    if not url:
-        st.error("❌ No se encontró SUPABASE_DB_URL en Secrets.")
-        st.stop()
-    conn = psycopg2.connect(
-        url,
-        connect_timeout=10,
-        keepalives=1,
-        keepalives_idle=30,
-        keepalives_interval=10,
-        keepalives_count=3
-    )
-    return conn
-
-def release_conn(conn):
-    try: conn.close()
-    except: pass
-
-# ─── PDF GENERATOR ─────────────────────────────────────────────────────────────
-def generar_pdf_partido(pid):
-    """Genera PDF completo del partido. Retorna bytes o None si no existe."""
-    from reportlab.lib.pagesizes import A4
-    from reportlab.lib import colors
-    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-    from reportlab.lib.units import cm, mm
-    from reportlab.platypus import (SimpleDocTemplate, Paragraph, Spacer, Table,
-                                    TableStyle, HRFlowable, KeepTogether)
-    from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
-
-    # ── Paleta ──────────────────────────────────────────────────────────
-    ROJO   = colors.HexColor("#9b2335")
-    ROJO_L = colors.HexColor("#f5e8ea")
-    AMAR   = colors.HexColor("#f0c040")
-    AMAR_L = colors.HexColor("#fdf7e0")
-    GRIS   = colors.HexColor("#555555")
-    GRIS_L = colors.HexColor("#f4f4f4")
-    VERDE  = colors.HexColor("#1a7a2e")
-    VERDE_L= colors.HexColor("#e8f5ec")
-    NEG    = colors.HexColor("#ff4444")
-    BLANCO = colors.white
-
-    W = 17*cm   # ancho útil de la página (A4 = 21cm - 4cm márgenes)
-
-    buf = io.BytesIO()
-    doc = SimpleDocTemplate(buf, pagesize=A4,
-                            leftMargin=2*cm, rightMargin=2*cm,
-                            topMargin=1.8*cm, bottomMargin=1.8*cm,
-                            title="Informe de Partido - Union y Progreso")
-
-    # ── Estilos ──────────────────────────────────────────────────────────
-    SS = getSampleStyleSheet()
-
-    def E(name, base='Normal', **kw):
-        return ParagraphStyle(name, parent=SS[base], **kw)
-
-    sT  = E('sT',  'Title',   fontSize=20, textColor=ROJO, alignment=TA_CENTER,
-             spaceAfter=2, leading=24)
-    sSub= E('sSub','Normal',  fontSize=10, textColor=GRIS, alignment=TA_CENTER,
-             spaceAfter=0, leading=14)
-    sSec= E('sSec','Normal',  fontSize=11, textColor=BLANCO, fontName='Helvetica-Bold',
-             leading=14, spaceAfter=0, spaceBefore=0)
-    sN  = E('sN',  'Normal',  fontSize=9,  leading=13, textColor=colors.HexColor("#222222"))
-    sBold=E('sBold','Normal', fontSize=9,  leading=13, fontName='Helvetica-Bold',
-             textColor=colors.HexColor("#222222"))
-    sPie= E('sPie','Normal',  fontSize=7.5,textColor=GRIS, alignment=TA_CENTER)
-    sCtr= E('sCtr','Normal',  fontSize=9,  alignment=TA_CENTER,
-             textColor=colors.HexColor("#222222"))
-
-    def hr(c=ROJO, t=0.6):
-        return HRFlowable(width="100%", thickness=t, color=c,
-                          spaceAfter=5, spaceBefore=3)
-    def sp(h=5): return Spacer(1, h)
-
-    # Cabecera de sección con color configurable
-    def sec_header(txt, bg_color):
-        t = Table([[Paragraph(txt, sSec)]], colWidths=[W])
-        t.setStyle(TableStyle([
-            ('BACKGROUND', (0,0), (-1,-1), bg_color),
-            ('TOPPADDING', (0,0), (-1,-1), 6),
-            ('BOTTOMPADDING', (0,0), (-1,-1), 6),
-            ('LEFTPADDING', (0,0), (-1,-1), 10),
-        ]))
-        return t
-
-    # Paleta de colores por sección
-    C_ALIN  = colors.HexColor("#1a5c8a")   # azul — alineación
-    C_GOLES = colors.HexColor("#1a7a2e")   # verde — goles
-    C_TARJ  = colors.HexColor("#9b2335")   # rojo — tarjetas
-    C_COBRO = colors.HexColor("#6b3010")   # café — cobros
-    C_FIN   = colors.HexColor("#2a5c2a")   # verde oscuro — finanzas
-    C_STATS = colors.HexColor("#4a1060")   # morado — estadísticas
-    C_GOL_TOP=colors.HexColor("#b07800")   # dorado — goleadores
-    C_ARB   = colors.HexColor("#444444")   # gris oscuro — arbitral
-    C_NOTAS = colors.HexColor("#555555")   # gris — notas
-
-    # Fondos claros correspondientes
-    F_ALIN  = colors.HexColor("#e8f2f9")
-    F_GOLES = colors.HexColor("#e8f5ec")
-    F_TARJ  = colors.HexColor("#fdf0f2")
-    F_COBRO = colors.HexColor("#fdf3ed")
-    F_FIN   = colors.HexColor("#edf5ed")
-    F_STATS = colors.HexColor("#f3eef7")
-
-    # Tabla genérica — header_color configurable
-    def tabla(data, widths, align_cols=None, header_color=None):
-        if header_color is None: header_color = ROJO
-        t = Table(data, colWidths=widths, repeatRows=1)
-        style = [
-            ('FONTNAME',  (0,0), (-1,-1), 'Helvetica'),
-            ('FONTSIZE',  (0,0), (-1,-1), 8.5),
-            ('LEADING',   (0,0), (-1,-1), 12),
-            ('BACKGROUND',(0,0), (-1,0),  header_color),
-            ('TEXTCOLOR', (0,0), (-1,0),  BLANCO),
-            ('FONTNAME',  (0,0), (-1,0),  'Helvetica-Bold'),
-            ('FONTSIZE',  (0,0), (-1,0),  8.5),
-            ('ALIGN',     (0,0), (-1,0),  'CENTER'),
-            ('ROWBACKGROUNDS', (0,1), (-1,-1), [BLANCO, GRIS_L]),
-            ('GRID',      (0,0), (-1,-1), 0.3, colors.HexColor("#cccccc")),
-            ('VALIGN',    (0,0), (-1,-1), 'MIDDLE'),
-            ('TOPPADDING',(0,0), (-1,-1), 4),
-            ('BOTTOMPADDING',(0,0),(-1,-1),4),
-            ('LEFTPADDING', (0,0),(-1,-1), 5),
-            ('RIGHTPADDING',(0,0),(-1,-1), 5),
-        ]
-        if align_cols:
-            for col, align in align_cols.items():
-                style.append(('ALIGN', (col,1), (col,-1), align))
-        t.setStyle(TableStyle(style))
-        return t
-
-    # Tabla con última fila destacada (totales)
-    def tabla_con_total(data, widths, align_cols=None, header_color=None, total_color=None):
-        if header_color is None: header_color = ROJO
-        if total_color  is None: total_color  = ROJO_L
-        t = tabla(data, widths, align_cols, header_color)
-        t.setStyle(TableStyle([
-            ('BACKGROUND', (0,-1), (-1,-1), total_color),
-            ('FONTNAME',   (0,-1), (-1,-1), 'Helvetica-Bold'),
-            ('FONTSIZE',   (0,-1), (-1,-1), 8.5),
-        ]))
-        return t
-
-    # Celda de métrica pequeña
-    def celdas_metricas(items):
-        """items = list of (label, valor, color_valor)"""
-        n = len(items)
-        w = W / n
-        header = [Paragraph(f'<font size="7" color="#888888">{lb}</font>', sCtr) for lb,_,_ in items]
-        vals   = [Paragraph(f'<font size="16" color="{vc}"><b>{vl}</b></font>', sCtr)
-                  for _,vl,vc in items]
-        t = Table([header, vals], colWidths=[w]*n)
-        t.setStyle(TableStyle([
-            ('BACKGROUND', (0,0), (-1,-1), GRIS_L),
-            ('GRID', (0,0), (-1,-1), 0.3, colors.HexColor("#dddddd")),
-            ('TOPPADDING', (0,0), (-1,-1), 5),
-            ('BOTTOMPADDING', (0,0), (-1,-1), 5),
-            ('ALIGN', (0,0), (-1,-1), 'CENTER'),
-            ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
-        ]))
-        return t
-
-    # ── Consultas de datos ────────────────────────────────────────────────
-    p = q("SELECT * FROM partidos WHERE id=%s", (pid,))
-    if len(p) == 0: return None
-    p = p.iloc[0]
-    gf = int(p['goles_favor'] or 0)
-    gc = int(p['goles_contra'] or 0)
-    resultado   = "GANADO" if gf>gc else ("EMPATE" if gf==gc else "PERDIDO")
-    color_res   = "#1a7a2e" if gf>gc else ("#c08000" if gf==gc else "#cc0000")
-    rival       = str(p['rival'] or 'N/D')
-    fecha_str   = str(p['fecha'] or '')
-    cancha_str  = str(p['cancha'] or 'N/D')
-
-    partic = q("""SELECT j.nombre, pa.rol FROM participaciones pa
-                  JOIN jugadores j ON pa.jugador_id=j.id
-                  WHERE pa.partido_id=%s ORDER BY pa.rol DESC, j.nombre""", (pid,))
-    titulares_list = partic[partic['rol']=='titular']['nombre'].tolist()
-    cambios_list   = partic[partic['rol']=='cambio']['nombre'].tolist()
-
-    cambios_det = q("""SELECT js.nombre as sale, je.nombre as entra, c.minuto
-                       FROM cambios c
-                       JOIN jugadores js ON c.jugador_sale_id=js.id
-                       JOIN jugadores je ON c.jugador_entra_id=je.id
-                       WHERE c.partido_id=%s ORDER BY c.minuto""", (pid,))
-
-    goles_det = q("""SELECT COALESCE(j.nombre,'Desconocido') as nombre, g.minuto, g.tipo
-                     FROM goles g LEFT JOIN jugadores j ON g.jugador_id=j.id
-                     WHERE g.partido_id=%s ORDER BY g.minuto""", (pid,))
-
-    tarj = q("""SELECT j.nombre, t.tipo FROM tarjetas t
-                JOIN jugadores j ON t.jugador_id=j.id
-                WHERE t.partido_id=%s ORDER BY t.tipo, j.nombre""", (pid,))
-
-    sanciones_p = q("""SELECT j.nombre, s.motivo, s.partidos_suspension, s.partidos_cumplidos
-                        FROM sanciones s JOIN jugadores j ON s.jugador_id=j.id
-                        WHERE s.partido_origen_id=%s""", (pid,))
-
-    # Jugadores que estaban suspendidos para ESTE partido
-    # (sancionados en partidos ANTERIORES a este, con suspension pendiente)
-    fecha_partido = str(p['fecha'])
-    suspendidos_este = q("""
-        SELECT j.nombre, s.motivo, s.partidos_suspension, s.partidos_cumplidos,
-               po.fecha as fecha_origen, po.rival as rival_origen,
-               (s.partidos_suspension - s.partidos_cumplidos) as restantes
-        FROM sanciones s
-        JOIN jugadores j ON s.jugador_id=j.id
-        JOIN partidos po ON s.partido_origen_id=po.id
-        WHERE po.fecha < %s AND s.partidos_cumplidos < s.partidos_suspension
-          AND j.id NOT IN (
-              SELECT jugador_id FROM participaciones WHERE partido_id=%s
-          )
-        ORDER BY j.nombre
-    """, (fecha_partido, pid))
-
-    pagos = q("""SELECT j.nombre, pg.monto, COALESCE(pg.monto_pagado,0) as pagado,
-                        COALESCE(pa.rol,'N/D') as rol
-                 FROM pagos pg JOIN jugadores j ON pg.jugador_id=j.id
-                 LEFT JOIN participaciones pa
-                    ON pa.jugador_id=pg.jugador_id AND pa.partido_id=pg.partido_id
-                 WHERE pg.partido_id=%s ORDER BY j.nombre""", (pid,))
-
-    multas_p = q("""SELECT j.nombre, m.concepto, m.monto, COALESCE(m.monto_pagado,0) as pagado
-                    FROM multas m JOIN jugadores j ON m.jugador_id=j.id
-                    WHERE m.partido_id=%s ORDER BY j.nombre""", (pid,))
-
-    # Movimientos de caja de este partido — deduplicar por concepto+monto
-    caja_p = q("""SELECT concepto, monto FROM caja
-                  WHERE partido_id=%s
-                  GROUP BY concepto, monto
-                  ORDER BY monto DESC""", (pid,))
-    ingresos_caja = float(caja_p[caja_p['monto']>0]['monto'].sum()) if len(caja_p)>0 else 0.0
-    egresos_caja  = float(abs(caja_p[caja_p['monto']<0]['monto'].sum())) if len(caja_p)>0 else 0.0
-    saldo_caja_p  = ingresos_caja - egresos_caja
-
-    # Estadísticas acumuladas hasta este partido (orden cronológico)
-    todos_p = q("SELECT * FROM partidos ORDER BY fecha ASC, id ASC")
-    sa = {"pts":0,"g":0,"e":0,"p":0,"gf":0,"gc":0}
-    for _, pp in todos_p.iterrows():
-        pgf = int(pp['goles_favor'] or 0)
-        pgc = int(pp['goles_contra'] or 0)
-        if pgf > pgc:   sa['g']+=1; sa['pts']+=3
-        elif pgf==pgc:  sa['e']+=1; sa['pts']+=1
-        else:           sa['p']+=1
-        sa['gf']+=pgf; sa['gc']+=pgc
-        if int(pp['id'])==pid: break
-
-    goleadores_top = q("""SELECT j.nombre, COUNT(g.id) as goles
-                           FROM goles g JOIN jugadores j ON g.jugador_id=j.id
-                           WHERE g.tipo='normal'
-                           GROUP BY j.id ORDER BY goles DESC LIMIT 5""")
-
-    informe_arb = str(p.get('informe_arbitral', '') or '')
-
-    # ── Construir PDF ────────────────────────────────────────────────────
-    story = []
-
-    # ── ENCABEZADO ───────────────────────────────────────────────────────
-    story.append(Paragraph("UNION Y PROGRESO", sT))
-    story.append(Paragraph("Barrio La Libertad  |  Informe de Partido", sSub))
-    story.append(hr())
-    story.append(sp(4))
-
-    # Marcador grande
-    s_score = E('score','Normal', fontSize=40, fontName='Helvetica-Bold',
-                 alignment=TA_CENTER, leading=46)
-    s_vs    = E('vs','Normal', fontSize=16, textColor=GRIS,
-                 alignment=TA_CENTER, leading=20)
-    s_res   = E('res','Normal', fontSize=13, fontName='Helvetica-Bold',
-                 alignment=TA_CENTER, leading=16)
-
-    score_tbl = Table(
-        [[Paragraph(str(gf), s_score),
-          Paragraph("VS", s_vs),
-          Paragraph(str(gc), s_score)],
-         [Paragraph("Union y Progreso", sSub),
-          Paragraph(f'<font color="{color_res}">{resultado}</font>', s_res),
-          Paragraph(rival, sSub)]],
-        colWidths=[5.5*cm, 6*cm, 5.5*cm]
-    )
-    score_tbl.setStyle(TableStyle([
-        ('ALIGN',   (0,0), (-1,-1), 'CENTER'),
-        ('VALIGN',  (0,0), (-1,-1), 'MIDDLE'),
-        ('TOPPADDING', (0,0), (-1,-1), 3),
-        ('BOTTOMPADDING', (0,0), (-1,-1), 3),
-        ('LINEBELOW', (0,0), (-1,0), 0.5, colors.HexColor("#eeeeee")),
-    ]))
-    story.append(score_tbl)
-    story.append(sp(6))
-    story.append(Paragraph(
-        f'Fecha: <b>{fecha_str}</b>   |   Cancha: <b>{cancha_str}</b>',
-        sSub))
-    story.append(sp(8))
-    story.append(hr())
-
-    # ── ALINEACION (azul) ────────────────────────────────────────────────
-    story.append(sp(4))
-    story.append(sec_header("ALINEACION", C_ALIN))
-    story.append(sp(5))
-
-    max_r = max(len(titulares_list), len(cambios_list), 1)
-    alin  = [["TITULARES", "ENTRARON AL CAMBIO"]]
-    for i in range(max_r):
-        alin.append([
-            titulares_list[i] if i < len(titulares_list) else "",
-            cambios_list[i]   if i < len(cambios_list)   else ""
-        ])
-    story.append(tabla(alin, [8.5*cm, 8.5*cm], header_color=C_ALIN))
-
-    if len(cambios_det) > 0:
-        story.append(sp(6))
-        det_cambios = [["SALE", "ENTRA", "MINUTO"]]
-        for _, ch in cambios_det.iterrows():
-            min_s = f"{int(ch['minuto'])}'" if ch['minuto'] else "—"
-            det_cambios.append([str(ch['sale']), str(ch['entra']), min_s])
-        story.append(tabla(det_cambios, [7*cm, 7*cm, 3*cm],
-                           align_cols={2: 'CENTER'}, header_color=C_ALIN))
-
-    # ── GOLES (verde) ────────────────────────────────────────────────────
-    story.append(sp(8))
-    story.append(sec_header("GOLES DEL PARTIDO", C_GOLES))
-    story.append(sp(5))
-
-    if len(goles_det) > 0:
-        g_data = [["#", "JUGADOR", "MIN.", "TIPO"]]
-        for i, (_, g) in enumerate(goles_det.iterrows(), 1):
-            tipo = "Normal" if g['tipo']=='normal' else "Propia puerta"
-            min_s = f"{int(g['minuto'])}'" if g['minuto'] else "—"
-            g_data.append([str(i), str(g['nombre']), min_s, tipo])
-        story.append(tabla(g_data, [1.2*cm, 9*cm, 2.8*cm, 4*cm],
-                           align_cols={0:'CENTER', 2:'CENTER'},
-                           header_color=C_GOLES))
-    else:
-        story.append(Paragraph("Sin goles registrados.", sN))
-
-    # ── TARJETAS Y SANCIONES (rojo) ───────────────────────────────────────
-    story.append(sp(8))
-    story.append(sec_header("TARJETAS Y SANCIONES", C_TARJ))
-    story.append(sp(5))
-
-    if len(tarj) > 0:
-        tarj_data = [["JUGADOR", "TARJETA"]]
-        from collections import Counter
-        am_count = Counter(tarj[tarj['tipo']=='amarilla']['nombre'].tolist())
-        procesados = set()
-        for _, t in tarj.iterrows():
-            nombre = str(t['nombre'])
-            tipo   = str(t['tipo'])
-            if tipo == 'amarilla':
-                if nombre in procesados: continue
-                procesados.add(nombre)
-                tarj_data.append([nombre,
-                    "Doble Amarilla" if am_count[nombre]>=2 else "Amarilla"])
-            else:
-                tarj_data.append([nombre, "Roja Directa"])
-        story.append(tabla(tarj_data, [11*cm, 6*cm], header_color=C_TARJ))
-    else:
-        story.append(Paragraph("Sin tarjetas en este partido.", sN))
-
-    if len(sanciones_p) > 0:
-        story.append(sp(6))
-        ml = {'roja_directa': 'Roja directa - 2 partidos de suspension',
-              'doble_amarilla': 'Doble amarilla - 1 partido de suspension',
-              'acumulacion_amarillas': '5 amarillas acumuladas - 1 partido'}
-        sanc_data = [["JUGADOR", "MOTIVO", "ESTADO"]]
-        for _, s in sanciones_p.iterrows():
-            pend = int(s['partidos_suspension']) - int(s['partidos_cumplidos'])
-            estado = "Cumplida" if pend==0 else f"Pendiente ({pend} partido(s))"
-            sanc_data.append([str(s['nombre']),
-                               ml.get(str(s['motivo']), str(s['motivo'])),
-                               estado])
-        t_sanc = tabla(sanc_data, [4.5*cm, 9*cm, 3.5*cm], header_color=C_TARJ)
-        for i, row in enumerate(sanc_data[1:], 1):
-            if "Pendiente" in row[2]:
-                t_sanc.setStyle(TableStyle([
-                    ('BACKGROUND', (0,i), (-1,i), ROJO_L),
-                    ('TEXTCOLOR', (2,i), (2,i), colors.HexColor("#aa0000")),
-                    ('FONTNAME', (2,i), (2,i), 'Helvetica-Bold'),
-                ]))
-        story.append(t_sanc)
-
-    # ── JUGADORES QUE NO PUDIERON JUGAR POR SUSPENSION ───────────────────
-    C_SUSP = colors.HexColor("#7a3010")   # naranja oscuro
-    story.append(sp(8))
-    story.append(sec_header("JUGADORES AUSENTES POR SUSPENSION", C_SUSP))
-    story.append(sp(5))
-
-    if len(suspendidos_este) > 0:
-        ml_susp = {
-            'roja_directa':          'Roja directa',
-            'doble_amarilla':        'Doble amarilla',
-            'acumulacion_amarillas': '5 amarillas acumuladas'
-        }
-        susp_data = [["JUGADOR", "MOTIVO SANCION", "ORIGEN", "ESTADO PARA PROXIMO PARTIDO"]]
-        for _, s in suspendidos_este.iterrows():
-            restantes = int(s['restantes'])
-            cumplidos = int(s['partidos_cumplidos'])
-            total     = int(s['partidos_suspension'])
-            motivo    = ml_susp.get(str(s['motivo']), str(s['motivo']))
-            origen    = f"vs {s['rival_origen']} ({s['fecha_origen']})"
-            if restantes <= 1:
-                estado = "Puede jugar el proximo partido"
-            else:
-                estado = f"Aun suspendido — faltan {restantes-1} partido(s) mas"
-            susp_data.append([str(s['nombre']), motivo, origen, estado])
-
-        t_susp = tabla(susp_data, [4*cm, 3.5*cm, 5*cm, 4.5*cm], header_color=C_SUSP)
-        # Colorear en rojo las filas que siguen suspendidos
-        for i, row in enumerate(susp_data[1:], 1):
-            if "Aun suspendido" in row[3]:
-                t_susp.setStyle(TableStyle([
-                    ('BACKGROUND', (0,i), (-1,i), colors.HexColor("#fde8e8")),
-                    ('TEXTCOLOR', (3,i), (3,i), colors.HexColor("#cc0000")),
-                    ('FONTNAME', (3,i), (3,i), 'Helvetica-Bold'),
-                ]))
-            else:
-                t_susp.setStyle(TableStyle([
-                    ('BACKGROUND', (0,i), (-1,i), colors.HexColor("#e8f5ec")),
-                    ('TEXTCOLOR', (3,i), (3,i), colors.HexColor("#007a30")),
-                    ('FONTNAME', (3,i), (3,i), 'Helvetica-Bold'),
-                ]))
-        story.append(t_susp)
-    else:
-        story.append(Paragraph("Ningún jugador estuvo ausente por suspensión en este partido.", sN))
-
-    # ── COBROS DEL PARTIDO (café) ─────────────────────────────────────────
-    story.append(sp(8))
-    story.append(sec_header("COBROS DEL PARTIDO", C_COBRO))
-    story.append(sp(5))
-
-    if len(pagos) > 0:
-        story.append(Paragraph("Cuotas de arbitraje:", sBold))
-        story.append(sp(4))
-        p_data = [["JUGADOR", "ROL", "CUOTA", "PAGADO", "DEBE PARTIDO", "DEUDA ANTERIOR", "DEUDA TOTAL"]]
-        tot_cuota = tot_pagado = tot_debe_total = 0.0
-        for _, row in pagos.iterrows():
-            debe_partido = float(row['monto']) - float(row['pagado'])
-            jid = int(q("SELECT id FROM jugadores WHERE nombre=%s", (row['nombre'],)).iloc[0]['id']) \
-                  if len(q("SELECT id FROM jugadores WHERE nombre=%s", (row['nombre'],))) > 0 else 0
-            # Deuda acumulada de otros partidos
-            d_otros = q("""SELECT COALESCE(SUM(monto-COALESCE(monto_pagado,0)),0) as d
-                           FROM pagos WHERE jugador_id=%s AND pagado=0 AND partido_id!=%s""",
-                        (jid, pid))['d'][0] if jid else 0
-            d_multas_otros = q("""SELECT COALESCE(SUM(monto-COALESCE(monto_pagado,0)),0) as d
-                                  FROM multas WHERE jugador_id=%s AND pagado=0 AND partido_id!=%s""",
-                               (jid, pid))['d'][0] if jid else 0
-            deuda_anterior = float(d_otros) + float(d_multas_otros)
-            deuda_total = debe_partido + deuda_anterior
-
-            tot_cuota   += float(row['monto'])
-            tot_pagado  += float(row['pagado'])
-            tot_debe_total += deuda_total
-
-            rol_s = "Titular" if row['rol']=='titular' else ("Cambio" if row['rol']=='cambio' else "—")
-            p_data.append([
-                str(row['nombre']), rol_s,
-                f"${float(row['monto']):,.2f}",
-                f"${float(row['pagado']):,.2f}",
-                f"${debe_partido:,.2f}" if debe_partido>0.001 else "Al dia",
-                f"${deuda_anterior:,.2f}" if deuda_anterior>0.001 else "—",
-                f"${deuda_total:,.2f}" if deuda_total>0.001 else "Al dia",
-            ])
-        p_data.append(["TOTAL", "", f"${tot_cuota:,.2f}", f"${tot_pagado:,.2f}",
-                        "", "", f"${tot_debe_total:,.2f}"])
-        story.append(tabla_con_total(p_data,
-            [4*cm, 1.8*cm, 2*cm, 2*cm, 2.2*cm, 2.5*cm, 2.5*cm],
-            align_cols={2:'RIGHT', 3:'RIGHT', 4:'RIGHT', 5:'RIGHT', 6:'RIGHT'},
-            header_color=C_COBRO,
-            total_color=colors.HexColor("#fde8d8")))
-
-    if len(multas_p) > 0:
-        story.append(sp(8))
-        story.append(Paragraph("Multas por tarjetas:", sBold))
-        story.append(sp(4))
-        m_data = [["JUGADOR", "CONCEPTO", "MULTA", "PAGADO", "DEBE"]]
-        for _, row in multas_p.iterrows():
-            debe = float(row['monto']) - float(row['pagado'])
-            m_data.append([str(row['nombre']),
-                            str(row['concepto']),
-                            f"${float(row['monto']):,.2f}",
-                            f"${float(row['pagado']):,.2f}",
-                            f"${debe:,.2f}" if debe>0.001 else "Al dia"])
-        story.append(tabla(m_data,
-            [4*cm, 6*cm, 2.3*cm, 2.3*cm, 2.4*cm],
-            align_cols={2:'RIGHT', 3:'RIGHT', 4:'RIGHT'},
-            header_color=C_COBRO))
-
-    # ── RESUMEN FINANCIERO (verde oscuro) ─────────────────────────────────
-    story.append(sp(8))
-    story.append(sec_header("RESUMEN FINANCIERO DEL PARTIDO", C_FIN))
-    story.append(sp(5))
-
-    fin_data = [["CONCEPTO", "TIPO", "MONTO"]]
-    for _, row in caja_p.iterrows():
-        tipo_s = "Ingreso" if float(row['monto'])>=0 else "Egreso"
-        fin_data.append([str(row['concepto']), tipo_s,
-                          f"${float(row['monto']):,.2f}"])
-    if len(fin_data) > 1:
-        story.append(tabla(fin_data, [10*cm, 3*cm, 4*cm],
-                           align_cols={2:'RIGHT'}, header_color=C_FIN))
-        story.append(sp(6))
-
-    color_saldo = "#1a7a2e" if saldo_caja_p >= 0 else "#cc0000"
-    story.append(celdas_metricas([
-        ("Total Ingresos",    f"${ingresos_caja:,.2f}", "#1a7a2e"),
-        ("Total Egresos",     f"${egresos_caja:,.2f}",  "#cc0000"),
-        ("Saldo del Partido", f"${saldo_caja_p:,.2f}",  color_saldo),
-    ]))
-
-    # ── ESTADISTICAS ACUMULADAS (morado) ──────────────────────────────────
-    story.append(sp(8))
-    story.append(sec_header("ESTADISTICAS ACUMULADAS DEL EQUIPO", C_STATS))
-    story.append(sp(5))
-
-    n_part = sa['g'] + sa['e'] + sa['p']
-    dif = sa['gf'] - sa['gc']
-    dif_s = f"+{dif}" if dif >= 0 else str(dif)
-
-    story.append(celdas_metricas([
-        ("Partidos", str(n_part),    "#333333"),
-        ("Puntos",   str(sa['pts']), "#4a1060"),
-        ("Ganados",  str(sa['g']),   "#1a7a2e"),
-        ("Empates",  str(sa['e']),   "#c08000"),
-        ("Perdidos", str(sa['p']),   "#cc0000"),
-    ]))
-    story.append(sp(5))
-    story.append(celdas_metricas([
-        ("Goles a Favor",   str(sa['gf']), "#1a7a2e"),
-        ("Goles en Contra", str(sa['gc']), "#cc0000"),
-        ("Diferencia",      dif_s,          color_saldo),
-    ]))
-
-    # ── GOLEADORES GLOBALES (dorado) ──────────────────────────────────────
-    if len(goleadores_top) > 0:
-        story.append(sp(8))
-        story.append(sec_header("TOP GOLEADORES DEL EQUIPO", C_GOL_TOP))
-        story.append(sp(5))
-        gt_data = [["POS.", "JUGADOR", "GOLES"]]
-        for i, (_, row) in enumerate(goleadores_top.iterrows(), 1):
-            pos = ["1ro", "2do", "3ro", "4to", "5to"][i-1]
-            gt_data.append([pos, str(row['nombre']), str(int(row['goles']))])
-        story.append(tabla(gt_data, [2*cm, 12*cm, 3*cm],
-                           align_cols={0:'CENTER', 2:'CENTER'},
-                           header_color=C_GOL_TOP))
-
-    # ── COMENTARIOS ARBITRALES (gris oscuro) ─────────────────────────────
-    if informe_arb.strip():
-        story.append(sp(8))
-        story.append(sec_header("COMENTARIOS DEL INFORME ARBITRAL", C_ARB))
-        story.append(sp(5))
-        # Caja con fondo gris claro para el texto
-        arb_tbl = Table([[Paragraph(informe_arb, sN)]], colWidths=[W])
-        arb_tbl.setStyle(TableStyle([
-            ('BACKGROUND', (0,0), (-1,-1), colors.HexColor("#f7f7f7")),
-            ('BOX', (0,0), (-1,-1), 0.5, colors.HexColor("#cccccc")),
-            ('TOPPADDING', (0,0), (-1,-1), 8),
-            ('BOTTOMPADDING', (0,0), (-1,-1), 8),
-            ('LEFTPADDING', (0,0), (-1,-1), 10),
-            ('RIGHTPADDING', (0,0), (-1,-1), 10),
-        ]))
-        story.append(arb_tbl)
-
-    # ── NOTAS (gris) ─────────────────────────────────────────────────────
-    if p['notas'] and str(p['notas']).strip():
-        story.append(sp(8))
-        story.append(sec_header("NOTAS DEL PARTIDO", C_NOTAS))
-        story.append(sp(5))
-        notas_tbl = Table([[Paragraph(str(p['notas']), sN)]], colWidths=[W])
-        notas_tbl.setStyle(TableStyle([
-            ('BACKGROUND', (0,0), (-1,-1), colors.HexColor("#f7f7f7")),
-            ('BOX', (0,0), (-1,-1), 0.5, colors.HexColor("#cccccc")),
-            ('TOPPADDING', (0,0), (-1,-1), 8),
-            ('BOTTOMPADDING', (0,0), (-1,-1), 8),
-            ('LEFTPADDING', (0,0), (-1,-1), 10),
-            ('RIGHTPADDING', (0,0), (-1,-1), 10),
-        ]))
-        story.append(notas_tbl)
-
-    # ── PIE DE PAGINA ─────────────────────────────────────────────────────
-    story.append(sp(14))
-    story.append(hr(GRIS, 0.4))
-    story.append(Paragraph(
-        f"Informe generado el {date.today().strftime('%d/%m/%Y')}  |  "
-        f"Union y Progreso  |  Barrio La Libertad",
-        sPie))
-
-    doc.build(story)
-    buf.seek(0)
-    return buf.getvalue()
-
-# ─── DATABASE ──────────────────────────────────────────────────────────────────
-def init_db():
-    """Tables already created in Supabase. Just verify connection."""
-    try:
-        conn = get_conn()
-        conn.close()
-    except Exception as e:
-        pass
-
-def _init_db_old():
-    conn = get_conn()
-    c = conn.cursor()
-    c.executescript("""
-    CREATE TABLE IF NOT EXISTS jugadores (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        nombre TEXT NOT NULL,
-        numero INTEGER,
-        posicion TEXT,
-        exento_arbitraje INTEGER DEFAULT 0,
-        exento_uniforme INTEGER DEFAULT 0,
-        activo INTEGER DEFAULT 1
-    );
-
-    CREATE TABLE IF NOT EXISTS partidos (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        fecha TEXT NOT NULL,
-        rival TEXT,
-        cancha TEXT,
-        goles_favor INTEGER DEFAULT 0,
-        goles_contra INTEGER DEFAULT 0,
-        costo_arbitraje REAL DEFAULT 0,
-        costo_agua REAL DEFAULT 0,
-        notas TEXT
-    );
-
-    CREATE TABLE IF NOT EXISTS participaciones (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        partido_id INTEGER,
-        jugador_id INTEGER,
-        rol TEXT,
-        FOREIGN KEY(partido_id) REFERENCES partidos(id),
-        FOREIGN KEY(jugador_id) REFERENCES jugadores(id)
-    );
-
-    CREATE TABLE IF NOT EXISTS pagos (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        partido_id INTEGER,
-        jugador_id INTEGER,
-        monto REAL DEFAULT 0,
-        pagado INTEGER DEFAULT 0,
-        FOREIGN KEY(partido_id) REFERENCES partidos(id),
-        FOREIGN KEY(jugador_id) REFERENCES jugadores(id)
-    );
-
-    CREATE TABLE IF NOT EXISTS tarjetas (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        partido_id INTEGER,
-        jugador_id INTEGER,
-        tipo TEXT,
-        cumplida INTEGER DEFAULT 0,
-        FOREIGN KEY(partido_id) REFERENCES partidos(id),
-        FOREIGN KEY(jugador_id) REFERENCES jugadores(id)
-    );
-
-    CREATE TABLE IF NOT EXISTS caja (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        partido_id INTEGER,
-        concepto TEXT,
-        monto REAL,
-        fecha TEXT,
-        FOREIGN KEY(partido_id) REFERENCES partidos(id)
-    );
-
-    CREATE TABLE IF NOT EXISTS sanciones (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        jugador_id INTEGER NOT NULL,
-        partido_origen_id INTEGER NOT NULL,
-        motivo TEXT NOT NULL,
-        partidos_suspension INTEGER NOT NULL DEFAULT 1,
-        partidos_cumplidos INTEGER NOT NULL DEFAULT 0,
-        FOREIGN KEY(jugador_id) REFERENCES jugadores(id),
-        FOREIGN KEY(partido_origen_id) REFERENCES partidos(id)
-    );
-
-    CREATE TABLE IF NOT EXISTS goles (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        partido_id INTEGER NOT NULL,
-        jugador_id INTEGER,
-        minuto INTEGER,
-        tipo TEXT DEFAULT 'normal',
-        FOREIGN KEY(partido_id) REFERENCES partidos(id),
-        FOREIGN KEY(jugador_id) REFERENCES jugadores(id)
-    );
-
-    CREATE TABLE IF NOT EXISTS cambios (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        partido_id INTEGER NOT NULL,
-        jugador_sale_id INTEGER NOT NULL,
-        jugador_entra_id INTEGER NOT NULL,
-        minuto INTEGER,
-        FOREIGN KEY(partido_id) REFERENCES partidos(id),
-        FOREIGN KEY(jugador_sale_id) REFERENCES jugadores(id),
-        FOREIGN KEY(jugador_entra_id) REFERENCES jugadores(id)
-    );
-
-    CREATE TABLE IF NOT EXISTS multas (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        partido_id INTEGER NOT NULL,
-        jugador_id INTEGER NOT NULL,
-        concepto TEXT NOT NULL,
-        monto REAL NOT NULL DEFAULT 0,
-        pagado INTEGER DEFAULT 0,
-        FOREIGN KEY(partido_id) REFERENCES partidos(id),
-        FOREIGN KEY(jugador_id) REFERENCES jugadores(id)
-    );
-
-    CREATE TABLE IF NOT EXISTS calendario (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        fecha TEXT NOT NULL,
-        hora TEXT DEFAULT '',
-        rival TEXT NOT NULL,
-        estadio TEXT DEFAULT '',
-        notas TEXT DEFAULT '',
-        tipo TEXT DEFAULT 'Liga'
-    );
-    """)
-    # Migraciones seguras — agregan columnas si no existen
-    migraciones = [
-        "ALTER TABLE pagos ADD COLUMN IF NOT EXISTS monto_pagado REAL DEFAULT 0",
-        "ALTER TABLE multas ADD COLUMN IF NOT EXISTS monto_pagado REAL DEFAULT 0",
-        "ALTER TABLE partidos ADD COLUMN IF NOT EXISTS informe_arbitral TEXT DEFAULT ''",
-    ]
-    conn = get_conn()
-    cur = conn.cursor()
-    for sql in migraciones:
-        try:
-            cur.execute(sql)
-        except Exception:
-            pass
-    conn.commit()
-    release_conn(conn)
-
-init_db()
-
-# ─── PAGE CONFIG ───────────────────────────────────────────────────────────────
 st.set_page_config(
-    page_title="⚽ Unión y Progreso",
-    page_icon="⚽",
+    page_title="OVOMAS v4.1",
+    page_icon="🐔",
     layout="wide",
-    initial_sidebar_state="collapsed",
+    initial_sidebar_state="expanded",
 )
 
-# ─── LOGIN ─────────────────────────────────────────────────────────────────────
-try:
-    PASS_ADMIN   = st.secrets["PASS_ADMIN"]
-    PASS_JUGADOR = st.secrets["PASS_JUGADOR"]
-except Exception:
-    PASS_ADMIN   = "Renato"
-    PASS_JUGADOR = "Progreso"
+from auth import require_auth, can_write, can_delete, current_user, logout
+from state import (
+    get_engine, reset_engine,
+    engine_to_excel_bytes, load_engine_from_excel,
+    guardar_estado, estado_drive,
+)
+from ui_components import inject_css, header, section, alert, badge, fig_barras, fig_pie, PAL
 
-USUARIOS = {
-    "admin":   {"password": PASS_ADMIN,   "rol": "admin"},
-    "jugador": {"password": PASS_JUGADOR, "rol": "jugador"},
-}
+inject_css()
+require_auth()
 
-def login_screen():
-    st.markdown("""
-    <div style="max-width:380px;margin:60px auto 0 auto;text-align:center;">
-      <div style="font-family:'Bebas Neue',sans-serif;font-size:52px;color:#b87800;letter-spacing:4px;">⚽</div>
-      <div style="font-family:'Bebas Neue',sans-serif;font-size:32px;color:#b87800;letter-spacing:3px;">UNIÓN Y PROGRESO</div>
-      <div style="color:#7a3030;font-size:12px;letter-spacing:2px;margin-bottom:32px;">BARRIO LA LIBERTAD</div>
-    </div>""", unsafe_allow_html=True)
-    with st.form("login_form"):
-        usuario  = st.text_input("👤 Usuario", placeholder="Ingresa tu usuario")
-        password = st.text_input("🔑 Contraseña", type="password", placeholder="Ingresa tu contraseña")
-        entrar   = st.form_submit_button("ENTRAR", use_container_width=True, type="primary")
-        if entrar:
-            u = usuario.strip().lower()
-            if u in USUARIOS and USUARIOS[u]["password"] == password:
-                st.session_state["usuario"] = u
-                st.session_state["rol"]     = USUARIOS[u]["rol"]
-                st.cache_data.clear(); st.rerun()
-            else:
-                st.error("Usuario o contraseña incorrectos.")
+ov = get_engine()
 
-if "usuario" not in st.session_state:
-    login_screen()
-    st.stop()
-
-IS_ADMIN = st.session_state.get("rol") == "admin"
-
+# ── Sidebar ────────────────────────────────────────────────────────
 with st.sidebar:
-    icono_rol = "🔐 Admin" if IS_ADMIN else "👤 Jugador"
-    st.markdown(f"**{icono_rol}** — {st.session_state['usuario']}")
-    if st.button("🚪 Cerrar sesión"):
-        for k in ["usuario", "rol"]: st.session_state.pop(k, None)
-        st.cache_data.clear(); st.rerun()
-    if IS_ADMIN:
-        st.markdown("---")
-        st.markdown("**⚙️ Administración**")
-        st.markdown("<small style='color:#7a3030;'>✅ Datos guardados en Supabase</small>", unsafe_allow_html=True)
-        st.markdown("---")
-        st.markdown("**🗑️ Borrar datos de prueba**")
-        st.caption("Elimina partidos, pagos, tarjetas, goles y sanciones. Los jugadores se conservan.")
-        key_confirm_reset = "confirm_reset_db"
-        if st.session_state.get(key_confirm_reset):
-            st.warning("⚠️ Esta acción no se puede deshacer. ¿Confirmas?")
-            col_si, col_no = st.columns(2)
-            with col_si:
-                if st.button("✅ Sí, borrar", type="primary"):
-                    _conn = get_conn()
-                    _cur = _conn.cursor()
-                    for _tbl in ["goles","cambios","multas","tarjetas","sanciones","pagos","participaciones","caja","partidos"]:
-                        _cur.execute(f"DELETE FROM {_tbl}")
-                    _conn.commit(); _conn.close()
-                    keys_keep = {"usuario", "rol"}
-                    for k in list(st.session_state.keys()):
-                        if k not in keys_keep: del st.session_state[k]
-                    st.success("✅ Datos eliminados. Jugadores conservados.")
-                    st.cache_data.clear(); st.rerun()
-            with col_no:
-                if st.button("❌ Cancelar"):
-                    st.session_state[key_confirm_reset] = False
-                    st.cache_data.clear(); st.rerun()
-        else:
-            if st.button("🗑️ Borrar datos de prueba"):
-                st.session_state[key_confirm_reset] = True
-                st.cache_data.clear(); st.rerun()
+    # ── Logo + marca ─────────────────────────────────────────────
+    st.markdown("""
+    <div style="
+        background: linear-gradient(135deg, #E65100, #BF360C);
+        border-radius: 10px;
+        padding: 14px 16px;
+        margin: -8px -8px 8px -8px;
+    ">
+        <div style="font-size:1.6em; margin-bottom:3px;">🐔</div>
+        <div style="
+            font-family: 'Inter', sans-serif;
+            font-weight: 800;
+            font-size: 1.05em;
+            letter-spacing: 2.5px;
+            color: #FFFFFF;
+        ">OVOMAS v4.1</div>
+        <div style="
+            font-size: 0.68em;
+            color: rgba(255,255,255,0.6);
+            letter-spacing: 1.5px;
+            margin-top: 2px;
+            text-transform: uppercase;
+        ">Sistema Integral Avícola</div>
+    </div>
+    """, unsafe_allow_html=True)
 
-# ─── HELPERS ───────────────────────────────────────────────────────────────────
-def q(sql, params=()):
-    """Execute SELECT query with retry logic."""
-    import decimal, time
-    sql_pg = sql.replace("?", "%s")
-    for intento in range(3):
-        conn = None
-        try:
-            conn = get_conn()
-            cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-            cur.execute(sql_pg, params if params else ())
-            rows = cur.fetchall()
-            col_names = [desc[0] for desc in cur.description] if cur.description else []
-            conn.close()
-            if not rows:
-                return pd.DataFrame(columns=col_names)
-            df = pd.DataFrame([dict(r) for r in rows])
-            for col in df.columns:
-                df[col] = df[col].apply(
-                    lambda x: float(x) if isinstance(x, decimal.Decimal) else x)
-            return df
-        except Exception as e:
-            if conn:
-                try: conn.close()
-                except: pass
-            if intento < 2:
-                time.sleep(1)
-            else:
-                raise e
+    # ── Menú modular agrupado ────────────────────────────────────
+    st.markdown("""
+    <style>
+    .nav-divider {
+        border: none; border-top: 1px solid rgba(255,255,255,0.08);
+        margin: 8px 0;
+    }
 
-def run(sql, params=()):
-    """Execute INSERT/UPDATE/DELETE with retry logic."""
-    import time
-    sql_pg = sql.replace("?", "%s")
-    for intento in range(3):
-        conn = None
-        try:
-            conn = get_conn()
-            cur = conn.cursor()
-            cur.execute(sql_pg, params if params else ())
-            conn.commit()
-            conn.close()
-            return
-        except Exception as e:
-            if conn:
-                try: conn.rollback(); conn.close()
-                except: pass
-            if intento < 2:
-                time.sleep(1)
-            else:
-                raise e
+    <hr class="nav-divider">
+    """, unsafe_allow_html=True)
 
-@st.cache_data(ttl=30)
-def get_jugadores():
-    return q("SELECT * FROM jugadores WHERE activo=1 ORDER BY numero")
+    # ── Fábrica de Balanceado ─────────────────────────────────
+    st.markdown("""<div style="
+        background:linear-gradient(90deg,rgba(230,81,0,0.35),rgba(230,81,0,0.08));
+        border-left:3px solid #E65100; border-radius:0 6px 6px 0;
+        padding:6px 10px; margin:8px 0 3px 0;
+        font-size:0.7em; font-weight:800; letter-spacing:1.5px;
+        color:#FFCCBC; font-family:monospace; text-transform:uppercase;
+    ">🏭 Fábrica de Balanceado</div>""", unsafe_allow_html=True)
+    st.page_link("pages/1___Materia_Prima.py",   label="🌾  Materia Prima",   use_container_width=True)
+    st.page_link("pages/2___Balanceado.py",      label="🎒  Balanceados",     use_container_width=True)
 
-@st.cache_data(ttl=30)
-def get_partidos():
-    return q("SELECT * FROM partidos ORDER BY id DESC")
+    # ── Galpones Avícolas ─────────────────────────────────────
+    st.markdown("""<div style="
+        background:linear-gradient(90deg,rgba(27,94,32,0.45),rgba(27,94,32,0.08));
+        border-left:3px solid #4CAF50; border-radius:0 6px 6px 0;
+        padding:6px 10px; margin:10px 0 3px 0;
+        font-size:0.7em; font-weight:800; letter-spacing:1.5px;
+        color:#C8E6C9; font-family:monospace; text-transform:uppercase;
+    ">🐔 Galpones Avícolas</div>""", unsafe_allow_html=True)
+    st.page_link("pages/3___Lotes_de_Aves.py",   label="🐣  Lotes de Aves",  use_container_width=True)
+    st.page_link("pages/4___Registro_Diario.py", label="📝  Registro Diario", use_container_width=True)
+    st.page_link("pages/5___Huevos.py",          label="🥚  Huevos",          use_container_width=True)
+    st.page_link("pages/6_💉_Salud.py",          label="💉  Salud",           use_container_width=True)
 
-def saldo_caja():
-    r = q("SELECT COALESCE(SUM(monto),0) as total FROM caja")
+    # ── Administración ────────────────────────────────────────
+    st.markdown("""<div style="
+        background:linear-gradient(90deg,rgba(21,101,192,0.35),rgba(21,101,192,0.08));
+        border-left:3px solid #2196F3; border-radius:0 6px 6px 0;
+        padding:6px 10px; margin:10px 0 3px 0;
+        font-size:0.7em; font-weight:800; letter-spacing:1.5px;
+        color:#BBDEFB; font-family:monospace; text-transform:uppercase;
+    ">📊 Administración</div>""", unsafe_allow_html=True)
+    st.page_link("pages/7_📈_Kardex_y_Reportes.py", label="📈  Kardex y Reportes", use_container_width=True)
+    st.page_link("pages/8___Costos.py",             label="💰  Costos",             use_container_width=True)
+    st.page_link("pages/9___Planificacion.py",       label="📋  Planificación",      use_container_width=True)
+
+    st.markdown("---")
+
+    # ── Cerrar sesión ────────────────────────────────────────
+    user_info = current_user()
+    st.markdown(f"""<div style="font-size:0.75em;color:#78909C;padding:4px 0">👤 {user_info.get('username','')} · {user_info.get('role_info',{}).get('label','')}</div>""", unsafe_allow_html=True)
+    if st.button("🚪 Cerrar sesión", use_container_width=True, key="btn_logout"):
+        logout()
+        st.rerun()
+
+    st.markdown("---")
+
+    # ── Estado Google Drive ───────────────────────────────────────
+    st.markdown("### ☁️ Google Drive")
     try:
-        return float(r['total'][0])
+        from sheets_sync import sheets_disponible
+        _drive_ok = sheets_disponible()
     except Exception:
-        return 0.0
+        _drive_ok = False
 
-# ── Disciplina ─────────────────────────────────────────────────────────────────
-@st.cache_data(ttl=20)
-def get_stats_bulk():
-    """Carga TODAS las estadísticas en 4 queries. Evita N queries por jugador."""
-    # Deudas
-    deudas_df = q("""
-        SELECT jugador_id, SUM(monto - COALESCE(monto_pagado,0)) as deuda
-        FROM (SELECT jugador_id, monto, monto_pagado FROM pagos WHERE pagado=0
-              UNION ALL
-              SELECT jugador_id, monto, monto_pagado FROM multas WHERE pagado=0) t
-        GROUP BY jugador_id
-    """)
-    deudas = {int(r['jugador_id']): float(r['deuda']) for _, r in deudas_df.iterrows()}
-
-    # Tarjetas amarillas por jugador por partido
-    tarj_df = q("""
-        SELECT jugador_id, partido_id, COUNT(*) as cnt
-        FROM tarjetas WHERE tipo='amarilla'
-        GROUP BY jugador_id, partido_id
-    """)
-
-    # Sanciones pendientes
-    sanc_df = q("""
-        SELECT s.jugador_id, s.motivo,
-               (s.partidos_suspension - s.partidos_cumplidos) as pendientes
-        FROM sanciones s
-        WHERE s.partidos_cumplidos < s.partidos_suspension
-    """)
-
-    # Goles
-    goles_df = q("""
-        SELECT jugador_id, COUNT(*) as total
-        FROM goles GROUP BY jugador_id
-    """)
-    goles = {int(r['jugador_id']): int(r['total']) for _, r in goles_df.iterrows()}
-
-    # Rojas
-    rojas_df = q("""
-        SELECT jugador_id, COUNT(*) as total
-        FROM tarjetas WHERE tipo='roja' GROUP BY jugador_id
-    """)
-    rojas = {int(r['jugador_id']): int(r['total']) for _, r in rojas_df.iterrows()}
-
-    return deudas, tarj_df, sanc_df, goles, rojas
-
-def _calc_amarillas_activas(jugador_id, tarj_df):
-    """Calcula amarillas simples activas desde el DataFrame bulk."""
-    if len(tarj_df) == 0:
-        return 0, 0
-    jdf = tarj_df[tarj_df['jugador_id']==jugador_id]
-    if len(jdf) == 0:
-        return 0, 0
-    # Partidos con doble amarilla
-    dobles = set(jdf[jdf['cnt']>=2]['partido_id'].tolist())
-    # Solo contar amarillas simples (partidos con 1 amarilla)
-    simples = int(jdf[jdf['cnt']==1]['cnt'].sum())
-    total_amarillas = int(jdf['cnt'].sum())
-    activas = simples % 5
-    return total_amarillas, activas
-
-def amarillas_totales(jugador_id):
-    _, tarj_df, _, _, _ = get_stats_bulk()
-    total, _ = _calc_amarillas_activas(jugador_id, tarj_df)
-    return total
-
-def amarillas_simples_total(jugador_id):
-    _, tarj_df, _, _, _ = get_stats_bulk()
-    if len(tarj_df) == 0: return 0
-    jdf = tarj_df[tarj_df['jugador_id']==jugador_id]
-    return int(jdf[jdf['cnt']==1]['cnt'].sum())
-
-def tarjetas_amarillas_activas(jugador_id):
-    _, tarj_df, _, _, _ = get_stats_bulk()
-    _, activas = _calc_amarillas_activas(jugador_id, tarj_df)
-    return activas
-
-def partidos_doble_amarilla(jugador_id):
-    _, tarj_df, _, _, _ = get_stats_bulk()
-    if len(tarj_df) == 0: return 0
-    jdf = tarj_df[tarj_df['jugador_id']==jugador_id]
-    return int((jdf['cnt']>=2).sum())
-
-def sanciones_pendientes(jugador_id):
-    _, _, sanc_df, _, _ = get_stats_bulk()
-    if len(sanc_df) == 0: return 0
-    jdf = sanc_df[sanc_df['jugador_id']==jugador_id]
-    return int(jdf['pendientes'].sum()) if len(jdf) > 0 else 0
-
-def esta_sancionado(jugador_id):
-    _, _, sanc_df, _, _ = get_stats_bulk()
-    _, tarj_df, _, _, _ = get_stats_bulk()
-    _, activas = _calc_amarillas_activas(jugador_id, tarj_df)
-    if len(sanc_df) > 0:
-        jdf = sanc_df[sanc_df['jugador_id']==jugador_id]
-        if len(jdf) > 0:
-            labels = {'roja_directa':'roja directa','doble_amarilla':'doble amarilla','acumulacion_amarillas':'5 amarillas'}
-            partes = [f"{labels.get(d['motivo'],d['motivo'])} ({int(d['pendientes'])} partido(s))" for _, d in jdf.iterrows()]
-            return f"🔴 Suspendido — {', '.join(partes)}"
-    if activas == 4:
-        return "⚠️ En riesgo — próxima amarilla = suspensión"
-    return ""
-
-def deuda_jugador(jugador_id):
-    deudas, _, _, _, _ = get_stats_bulk()
-    return deudas.get(jugador_id, 0.0)
-
-def goles_jugador(jugador_id):
-    _, _, _, goles, _ = get_stats_bulk()
-    return goles.get(jugador_id, 0)
-
-def get_all_deudas():
-    deudas, _, _, _, _ = get_stats_bulk()
-    return deudas
-
-def get_all_sanciones():
-    _, _, sanc_df, _, _ = get_stats_bulk()
-    if len(sanc_df) == 0: return {}
-    return {int(r['jugador_id']): int(r['pendientes']) for _, r in sanc_df.iterrows()}
-
-def get_all_tarjetas():
-    _, tarj_df, _, _, _ = get_stats_bulk()
-    if len(tarj_df) == 0: return {}
-    return {int(r['jugador_id']): int(r['cnt']) for _, r in tarj_df.iterrows()}
-
-def eliminar_partido_completo(pid):
-    """Elimina un partido y revierte TODOS sus efectos acumulados:
-    - Revierte monto_pagado de pagos que se aplicaron a otros partidos desde este
-    - Elimina todos los registros relacionados
-    """
-    conn = get_conn()
-    cur = conn.cursor()
-    #    (cuando alguien pagó más de su cuota y el exceso fue a otro partido)
-    #    Los movimientos de caja de este partido que digan "deuda anterior" son revertibles
-    # En realidad lo más limpio: revertir monto_pagado en pagos de OTROS partidos
-    # que fueron pagados "desde" este partido — no tenemos ese registro directo,
-    # pero sí podemos revertir los pagos de caja de este partido partido y
-    # dejar que las deudas queden pendientes de nuevo.
-
-    # 2. Restaurar pagos parciales: los jugadores que tenían pagado=1 por este partido
-    #    deben quedar pendientes de nuevo
-    pagos_del_partido = q("SELECT id, jugador_id, monto FROM pagos WHERE partido_id=%s", (pid,))
-    for _, pg in pagos_del_partido.iterrows():
-        cur.execute("UPDATE pagos SET monto_pagado=0, pagado=0 WHERE id=%s", (int(pg['id']),))
-
-    # 3. Restaurar multas pagadas de este partido
-    multas_del_partido = q("SELECT id FROM multas WHERE partido_id=%s", (pid,))
-    for _, m in multas_del_partido.iterrows():
-        cur.execute("UPDATE multas SET monto_pagado=0, pagado=0 WHERE id=%s", (int(m['id']),))
-
-    # 4. Eliminar todos los registros del partido
-    for tbl, col in [
-        ('participaciones',  'partido_id'),
-        ('tarjetas',         'partido_id'),
-        ('pagos',            'partido_id'),
-        ('caja',             'partido_id'),
-        ('goles',            'partido_id'),
-        ('cambios',          'partido_id'),
-        ('multas',           'partido_id'),
-        ('sanciones',        'partido_origen_id'),
-    ]:
-        cur.execute(f"DELETE FROM {tbl} WHERE {col}=%s", (pid,))
-
-    cur.execute("DELETE FROM partidos WHERE id=%s", (pid,))
-    conn.commit()
-    release_conn(conn)
-
-# ─── CUSTOM CSS ────────────────────────────────────────────────────────────────
-st.markdown("""
-<style>
-@import url('https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Nunito:wght@400;600;700;800&display=swap');
-
-html, body, .stApp, [class*="css"] {
-    font-family: 'Nunito', sans-serif !important;
-    background-color: #f5f0f0 !important;
-    color: #1a0808 !important;
-}
-
-h1, h2, h3 {
-    font-family: 'Bebas Neue', sans-serif !important;
-    letter-spacing: 2px;
-    color: #1a0808 !important;
-}
-
-.stTabs [data-baseweb="tab-list"] {
-    background: #ffffff;
-    border-radius: 12px;
-    padding: 4px;
-    gap: 4px;
-    border: 1px solid #d4a0a0;
-}
-.stTabs [data-baseweb="tab"] {
-    background: transparent;
-    color: #5a1020 !important;
-    border-radius: 8px;
-    font-family: 'Nunito', sans-serif;
-    font-weight: 700;
-    font-size: 13px;
-    padding: 8px 14px;
-}
-.stTabs [aria-selected="true"] {
-    background: #9b2335 !important;
-    color: white !important;
-}
-
-.metric-card {
-    background: #ffffff;
-    border: 1px solid #d4a0a0;
-    border-radius: 14px;
-    padding: 18px 20px;
-    margin-bottom: 12px;
-}
-.metric-card .label {
-    font-size: 11px;
-    color: #7a3030 !important;
-    text-transform: uppercase;
-    letter-spacing: 1px;
-    margin-bottom: 4px;
-}
-.metric-card .valor {
-    font-family: 'Bebas Neue', sans-serif;
-    font-size: 36px;
-    color: #9b2335 !important;
-    line-height: 1;
-}
-.metric-card .sub {
-    font-size: 12px;
-    color: #7a3030 !important;
-    margin-top: 4px;
-}
-
-.jugador-card {
-    background: #ffffff;
-    border: 1px solid #d4a0a0;
-    border-radius: 12px;
-    padding: 14px 16px;
-    margin-bottom: 8px;
-    display: flex;
-    align-items: center;
-    gap: 12px;
-}
-.jugador-num {
-    background: #9b2335;
-    color: #f0c040 !important;
-    font-family: 'Bebas Neue', sans-serif;
-    font-size: 22px;
-    width: 44px;
-    height: 44px;
-    border-radius: 8px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    flex-shrink: 0;
-}
-
-.badge {
-    display: inline-block;
-    padding: 3px 10px;
-    border-radius: 20px;
-    font-size: 11px;
-    font-weight: 700;
-    margin-right: 4px;
-}
-.badge-amarilla { background: #fff3cd; color: #7a5200 !important; border: 1px solid #e0a800; }
-.badge-roja     { background: #fde8e8; color: #7a0000 !important; border: 1px solid #e05050; }
-.badge-deuda    { background: #ffecd8; color: #7a3200 !important; border: 1px solid #e07820; }
-.badge-ok       { background: #d8f5e8; color: #005a20 !important; border: 1px solid #30a860; }
-.badge-exento   { background: #d8eeff; color: #004070 !important; border: 1px solid #3080cc; }
-.badge-sancion  { background: #9b2335; color: #ffffff !important; border: 1px solid #cc3048; }
-
-.section-header {
-    font-family: 'Bebas Neue', sans-serif;
-    font-size: 22px;
-    color: #9b2335 !important;
-    letter-spacing: 2px;
-    border-bottom: 2px solid #d4a0a0;
-    padding-bottom: 6px;
-    margin: 18px 0 12px 0;
-}
-
-.alerta-box {
-    background: #fff8e0;
-    border: 1px solid #e0a800;
-    border-radius: 10px;
-    padding: 12px 16px;
-    margin-bottom: 8px;
-    font-size: 14px;
-    color: #5a3a00 !important;
-}
-.peligro-box {
-    background: #fde8e8;
-    border: 1px solid #e05050;
-    border-radius: 10px;
-    padding: 12px 16px;
-    margin-bottom: 8px;
-    font-size: 14px;
-    color: #7a0000 !important;
-}
-.ok-box {
-    background: #e8f5ee;
-    border: 1px solid #30a860;
-    border-radius: 10px;
-    padding: 12px 16px;
-    margin-bottom: 8px;
-    font-size: 14px;
-    color: #005a20 !important;
-}
-
-.stButton button {
-    background: #9b2335 !important;
-    color: white !important;
-    border: none;
-    border-radius: 8px;
-    font-family: 'Nunito', sans-serif;
-    font-weight: 700;
-    padding: 8px 20px;
-}
-.stButton button:hover { background: #c43048 !important; }
-
-[data-testid="stSidebar"] {
-    background: #f0c040 !important;
-    border-right: 1px solid #d4a0a0;
-}
-[data-testid="stSidebar"] * { color: #1a0808 !important; }
-[data-testid="stSidebar"] .stButton button {
-    background: #9b2335 !important;
-    color: #ffffff !important;
-}
-[data-testid="stSidebar"] .stMarkdown { color: #1a0808 !important; }
-
-div[data-testid="stWidgetLabel"] p,
-label { color: #1a0808 !important; font-weight: 600 !important; }
-
-.stCaption { color: #7a3030 !important; }
-
-/* ── Bordes visibles en todos los campos de entrada ── */
-div[data-baseweb="input"] {
-    border: 1.5px solid #9b2335 !important;
-    border-radius: 6px !important;
-}
-div[data-baseweb="input"]:focus-within {
-    border: 2px solid #6b1020 !important;
-    box-shadow: 0 0 0 2px rgba(155,35,53,0.15) !important;
-}
-div[data-baseweb="select"] {
-    border: 1.5px solid #9b2335 !important;
-    border-radius: 6px !important;
-}
-div[data-baseweb="select"]:focus-within {
-    border: 2px solid #6b1020 !important;
-}
-div[data-baseweb="textarea"] {
-    border: 1.5px solid #9b2335 !important;
-    border-radius: 6px !important;
-}
-div[data-baseweb="textarea"]:focus-within {
-    border: 2px solid #6b1020 !important;
-}
-div[data-testid="stDateInput"] div[data-baseweb="input"] {
-    border: 1.5px solid #9b2335 !important;
-}
-div[data-testid="stNumberInput"] div[data-baseweb="input"] {
-    border: 1.5px solid #9b2335 !important;
-}
-div[data-testid="stMultiSelect"] div[data-baseweb="select"] {
-    border: 1.5px solid #9b2335 !important;
-}
-</style>
-""", unsafe_allow_html=True)
-
-# ─── HEADER ────────────────────────────────────────────────────────────────────
-st.markdown("""
-<div style="text-align:center; padding: 10px 0 20px 0;">
-  <span style="font-family:'Bebas Neue',sans-serif; font-size:48px; color:#b87800; letter-spacing:4px;">⚽ UNIÓN Y PROGRESO</span><br>
-  <span style="color:#7a3030; font-size:13px; letter-spacing:2px;">BARRIO LA LIBERTAD · CONTROL FINANCIERO · ALINEACIONES · DISCIPLINA</span>
-</div>
-""", unsafe_allow_html=True)
-
-# ─── TABS (según rol) ──────────────────────────────────────────────────────────
-if IS_ADMIN:
-    tabs = st.tabs(["🏠 INICIO", "👥 JUGADORES", "⚽ PARTIDO", "💰 FINANZAS", "🟨 DISCIPLINA", "📊 HISTORIAL", "📅 CALENDARIO"])
-    TAB_INICIO    = tabs[0]
-    TAB_JUGADORES = tabs[1]
-    TAB_PARTIDO   = tabs[2]
-    TAB_FINANZAS  = tabs[3]
-    TAB_DISCIPLINA= tabs[4]
-    TAB_HISTORIAL = tabs[5]
-    TAB_CALENDARIO= tabs[6]
-else:
-    tabs_j = st.tabs(["🏠 INICIO", "🟨 DISCIPLINA", "📊 HISTORIAL", "📅 CALENDARIO"])
-    TAB_INICIO    = tabs_j[0]
-    TAB_JUGADORES = None
-    TAB_PARTIDO   = None
-    TAB_FINANZAS  = None
-    TAB_DISCIPLINA= tabs_j[1]
-    TAB_HISTORIAL = tabs_j[2]
-    TAB_CALENDARIO= tabs_j[3]
-
-# ══════════════════════════════════════════════════════════════════════════════
-# TAB 1 — INICIO
-# ══════════════════════════════════════════════════════════════════════════════
-with TAB_INICIO:
-    jugadores = get_jugadores()
-    partidos = get_partidos()
-    saldo = float(saldo_caja() or 0)
-
-    # KPIs
-    col1, col2, col3, col4 = st.columns(4)
-    with col1:
-        st.markdown(f"""<div class="metric-card">
-            <div class="label">💰 Saldo en Caja</div>
-            <div class="valor">${saldo:,.0f}</div>
-            <div class="sub">Fondo acumulado</div>
-        </div>""", unsafe_allow_html=True)
-    with col2:
-        n_partidos = len(partidos)
-        st.markdown(f"""<div class="metric-card">
-            <div class="label">📅 Partidos Jugados</div>
-            <div class="valor">{n_partidos}</div>
-            <div class="sub">En el historial</div>
-        </div>""", unsafe_allow_html=True)
-    with col3:
-        n_jugadores = len(jugadores)
-        st.markdown(f"""<div class="metric-card">
-            <div class="label">👥 Jugadores Activos</div>
-            <div class="valor">{n_jugadores}</div>
-            <div class="sub">En el plantel</div>
-        </div>""", unsafe_allow_html=True)
-    with col4:
-        total_deudas = sum(deuda_jugador(int(row['id'])) for _, row in jugadores.iterrows())
-        st.markdown(f"""<div class="metric-card">
-            <div class="label">⚠️ Deudas Pendientes</div>
-            <div class="valor">${total_deudas:,.0f}</div>
-            <div class="sub">Total sin cobrar</div>
-        </div>""", unsafe_allow_html=True)
-
-    st.markdown('<div class="section-header">🚨 ALERTAS DEL PLANTEL</div>', unsafe_allow_html=True)
-
-    # Cargar stats en bulk — una sola query por tipo
-    bulk_deudas    = get_all_deudas()
-    bulk_sanciones = get_all_sanciones()
-    bulk_tarjetas  = get_all_tarjetas()
-
-    hay_alertas = False
-    for _, j in jugadores.iterrows():
-        jid = int(j['id'])
-        sancion  = esta_sancionado(jid)
-        deuda    = bulk_deudas.get(jid, 0.0)
-        activas  = bulk_tarjetas.get(jid, 0) % 5  # activas en ciclo actual
-
-        if sancion and "Suspendido" in sancion:
-            hay_alertas = True
-            st.markdown(f'<div class="peligro-box">🔴 <b>{j["nombre"]}</b> — {sancion}</div>', unsafe_allow_html=True)
-        elif activas == 4:
-            hay_alertas = True
-            st.markdown(f'<div class="alerta-box">🟨 <b>{j["nombre"]}</b> — 4 amarillas acumuladas. ¡Una más y se suspende!</div>', unsafe_allow_html=True)
-        if deuda > 0:
-            hay_alertas = True
-            st.markdown(f'<div class="alerta-box">💸 <b>{j["nombre"]}</b> — Debe <b>${deuda:,.0f}</b></div>', unsafe_allow_html=True)
-
-    if not hay_alertas:
-        st.markdown('<div class="ok-box">✅ Todo en orden. Sin alertas pendientes.</div>', unsafe_allow_html=True)
-
-    if len(partidos) > 0:
-        st.markdown('<div class="section-header">📅 ÚLTIMO PARTIDO</div>', unsafe_allow_html=True)
-        ult = partidos.iloc[0]
-        g_f = int(ult['goles_favor']) if ult['goles_favor'] else 0
-        g_c = int(ult['goles_contra']) if ult['goles_contra'] else 0
-        resultado = "Ganado ✅" if g_f > g_c else ("Empate 🤝" if g_f == g_c else "Perdido ❌")
-        st.markdown(f"""<div class="metric-card">
-            <div style="display:flex; justify-content:space-between; align-items:center;">
-                <div>
-                    <div class="label">{ult['fecha']} vs {ult['rival'] or 'Rival'}</div>
-                    <div class="valor" style="font-size:48px;">{g_f} - {g_c}</div>
-                    <div class="sub">{resultado} · Cancha: {ult['cancha'] or 'N/D'}</div>
-                </div>
-                <div style="font-size:64px; opacity:0.3;">⚽</div>
-            </div>
-        </div>""", unsafe_allow_html=True)
-
-# ══════════════════════════════════════════════════════════════════════════════
-# TAB 2 — JUGADORES (solo admin)
-# ══════════════════════════════════════════════════════════════════════════════
-if IS_ADMIN:
- with TAB_JUGADORES:
-    st.markdown('<div class="section-header">👥 PLANTEL</div>', unsafe_allow_html=True)
-    jugadores = get_jugadores()
-
-    for _, j in jugadores.iterrows():
-        jid = int(j['id'])
-        amarillas = amarillas_totales(jid)
-        activas = tarjetas_amarillas_activas(jid)
-        _, _, _, _, _rojas_bulk = get_stats_bulk()
-        rojas = _rojas_bulk.get(jid, 0)
-        rojas_pend = sanciones_pendientes(jid)
-        deuda = deuda_jugador(jid)
-        sancion = esta_sancionado(jid)
-
-        badges = ""
-        if j['exento_arbitraje']:
-            badges += '<span class="badge badge-exento">Exento árb.</span>'
-        if j['exento_uniforme']:
-            badges += '<span class="badge badge-exento">Exento unif.</span>'
-        if activas > 0:
-            badges += f'<span class="badge badge-amarilla">🟨 {activas} amarilla(s)</span>'
-        if rojas > 0:
-            color = "badge-roja" if rojas_pend > 0 else "badge-ok"
-            badges += f'<span class="badge {color}">🟥 {rojas} roja(s)</span>'
-        if deuda > 0:
-            badges += f'<span class="badge badge-deuda">💸 Debe ${deuda:,.0f}</span>'
-        if sancion and "Suspendido" in sancion:
-            badges += f'<span class="badge badge-sancion">SUSPENDIDO</span>'
-
-        num_display = j['numero'] if j['numero'] else "—"
+    if _drive_ok:
+        _ultimo = st.session_state.get("ultimo_guardado", "")
+        try:
+            dt = datetime.fromisoformat(str(_ultimo).replace("Z",""))
+            _ultimo_fmt = dt.strftime("%d/%m/%Y  %H:%M")
+        except Exception:
+            _ultimo_fmt = "Esta sesión"
         st.markdown(f"""
-        <div class="jugador-card">
-            <div class="jugador-num">{num_display}</div>
-            <div style="flex:1;">
-                <div style="font-weight:800; font-size:16px; color:#1a0808;">{j['nombre']}</div>
-                <div style="color:#7a3030; font-size:12px; margin-bottom:4px;">{j['posicion'] or 'Sin posición'}</div>
-                <div>{badges}</div>
-            </div>
+        <div style="
+            background: rgba(46,125,50,0.18);
+            border: 1px solid rgba(76,175,80,0.35);
+            border-left: 3px solid #4CAF50;
+            border-radius: 8px;
+            padding: 8px 12px;
+            margin-bottom: 8px;
+            font-family: monospace;
+        ">
+            <div style="color:#69F0AE; font-size:0.75em; font-weight:700; letter-spacing:1px">● CONECTADO</div>
+            <div style="color:#78909C; font-size:0.7em; margin-top:3px">Último guardado</div>
+            <div style="color:#E8EDF2; font-size:0.8em; font-weight:600">{_ultimo_fmt}</div>
+        </div>
+        """, unsafe_allow_html=True)
+        if st.button("☁️  Guardar en Drive", use_container_width=True, disabled=not can_write()):
+            with st.spinner("Guardando..."):
+                res = guardar_estado(ov)
+            if res["ok"]:
+                st.session_state["ultimo_guardado"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                st.success("Guardado ✓")
+            else:
+                st.error(res["msg"])
+    else:
+        st.markdown("""
+        <div style="
+            background: rgba(230,81,0,0.12);
+            border: 1px solid rgba(230,81,0,0.3);
+            border-left: 3px solid #E65100;
+            border-radius: 8px;
+            padding: 8px 12px;
+            margin-bottom: 8px;
+            font-family: monospace;
+        ">
+            <div style="color:#FF8A65; font-size:0.75em; font-weight:700; letter-spacing:1px">● NO DISPONIBLE</div>
+            <div style="color:#78909C; font-size:0.7em; margin-top:2px">Verifica credenciales .json</div>
         </div>
         """, unsafe_allow_html=True)
 
-    st.markdown('<div class="section-header">➕ AGREGAR JUGADOR</div>', unsafe_allow_html=True)
-    with st.form("form_jugador", clear_on_submit=True):
-        c1, c2 = st.columns(2)
-        with c1:
-            nombre = st.text_input("Nombre completo")
-            numero = st.number_input("Número de camiseta", min_value=1, max_value=99, value=1)
-        with c2:
-            posicion = st.selectbox("Posición", ["Portero", "Defensa", "Mediocampista", "Delantero"])
-            c3, c4 = st.columns(2)
-            with c3:
-                exento_arb = st.checkbox("Exento de arbitraje")
-            with c4:
-                exento_uni = st.checkbox("Exento de uniforme")
-        if st.form_submit_button("✅ Agregar jugador"):
-            if nombre:
-                run("INSERT INTO jugadores (nombre, numero, posicion, exento_arbitraje, exento_uniforme) VALUES (%s,%s,%s,%s,%s)",
-                    (nombre, numero, posicion, int(exento_arb), int(exento_uni)))
-                guardar_db_en_github()
-                st.success(f"✅ {nombre} agregado al plantel")
-                st.cache_data.clear(); st.rerun()
+    st.markdown("---")
 
-    # Editar/desactivar jugador
-    st.markdown('<div class="section-header">✏️ EDITAR JUGADOR</div>', unsafe_allow_html=True)
-    jugadores = get_jugadores()
-    if len(jugadores) > 0:
-        nombres_lista = jugadores['nombre'].tolist()
-        sel = st.selectbox("Selecciona jugador a editar", nombres_lista, key="edit_j")
-        j_sel = jugadores[jugadores['nombre'] == sel].iloc[0]
-        with st.form("form_editar_j"):
-            c1, c2 = st.columns(2)
-            with c1:
-                n_nombre = st.text_input("Nombre", value=j_sel['nombre'])
-                import math
-                num_val = j_sel['numero']
-                n_num = st.number_input("Número", min_value=1, max_value=99,
-                    value=int(num_val) if num_val and not (isinstance(num_val, float) and math.isnan(num_val)) else 1)
-            with c2:
-                posiciones = ["Portero", "Defensa", "Mediocampista", "Delantero"]
-                pos_idx = posiciones.index(j_sel['posicion']) if j_sel['posicion'] in posiciones else 0
-                n_pos = st.selectbox("Posición", posiciones, index=pos_idx)
-                c3, c4 = st.columns(2)
-                with c3:
-                    n_exarb = st.checkbox("Exento arbitraje", value=bool(j_sel['exento_arbitraje']))
-                with c4:
-                    n_exuni = st.checkbox("Exento uniforme", value=bool(j_sel['exento_uniforme']))
-            col_s, col_d = st.columns(2)
-            with col_s:
-                if st.form_submit_button("💾 Guardar cambios"):
-                    run("UPDATE jugadores SET nombre=%s, numero=%s, posicion=%s, exento_arbitraje=%s, exento_uniforme=%s WHERE id=%s",
-                        (n_nombre, n_num, n_pos, int(n_exarb), int(n_exuni), int(j_sel['id'])))
-                    guardar_db_en_github()
-                    st.success("✅ Jugador actualizado")
-                    st.cache_data.clear(); st.rerun()
-            with col_d:
-                if st.form_submit_button("🗑️ Desactivar jugador"):
-                    run("UPDATE jugadores SET activo=0 WHERE id=%s", (int(j_sel['id']),))
-                    guardar_db_en_github()
-                    st.warning(f"Jugador {j_sel['nombre']} desactivado")
-                    st.cache_data.clear(); st.rerun()
+    # ── Estado rápido ─────────────────────────────────────────────
+    st.markdown("### 📊 Estado del sistema")
+    n_mp  = len(ov.materias_primas)
+    n_rec = len(ov.recetas[ov.recetas["estado"] == "ACTIVA"]) if len(ov.recetas) > 0 else 0
+    n_lot = len(ov.lotes_aves[ov.lotes_aves["estado"] == "ACTIVO"]) if len(ov.lotes_aves) > 0 else 0
+    n_reg = len(ov.registro_diario)
 
-# ══════════════════════════════════════════════════════════════════════════════
-# TAB 3 — PARTIDO (4 FASES)
-# ══════════════════════════════════════════════════════════════════════════════
-if IS_ADMIN:
- with TAB_PARTIDO:
+    def _stat(icon, label, valor, ok):
+        c = "#69F0AE" if ok else "#FF5252"
+        return (
+            f"<div style='display:flex;justify-content:space-between;align-items:center;"
+            f"padding:5px 8px;border-radius:6px;margin:2px 0;"
+            f"background:rgba(255,255,255,0.04);'>"
+            f"<span style='color:#90A4AE;font-size:0.78em;font-family:monospace'>{icon} {label}</span>"
+            f"<span style='color:{c};font-size:0.78em;font-weight:700;font-family:monospace'>{valor}</span>"
+            f"</div>"
+        )
 
-    MOTIVO_LABELS = {
-        'roja_directa':         '🟥 Roja directa',
-        'doble_amarilla':       '🟨🟨 Doble amarilla (1 partido)',
-        'acumulacion_amarillas':'🟨×5 Acumulación (1 partido)'
+    st.markdown(
+        _stat("🌾", "Mat. Prima",  f"{n_mp} ing.",      n_mp > 0) +
+        _stat("🎒", "Recetas",     f"{n_rec} activas",  n_rec > 0) +
+        _stat("🐔", "Lotes",       f"{n_lot} activos",  n_lot > 0) +
+        _stat("📝", "Registros",   f"{n_reg} días",     n_reg > 0),
+        unsafe_allow_html=True
+    )
+
+    st.markdown("---")
+
+    # ── Backup ────────────────────────────────────────────────────
+    st.markdown("### 💾 Backup local")
+    st.markdown("""
+    <style>
+    [data-testid="stSidebar"] [data-testid="stDownloadButton"] > button,
+    [data-testid="stSidebar"] [data-testid="stDownloadButton"] > button:hover {
+        background: rgba(230,81,0,0.35) !important;
+        border: 1px solid #E65100 !important;
+        color: #FFFFFF !important;
+        font-weight: 600 !important;
     }
-
-    def fase_header(num, titulo, subtitulo, color):
-        st.markdown(f"""
-        <div style="background:{color};border-radius:12px;padding:14px 20px;margin-bottom:14px;">
-          <div style="font-family:'Bebas Neue',sans-serif;font-size:22px;letter-spacing:2px;color:#fff;">
-            FASE {num} — {titulo}
-          </div>
-          <div style="font-size:13px;color:rgba(255,255,255,0.8);margin-top:2px;">{subtitulo}</div>
-        </div>""", unsafe_allow_html=True)
-
-    # ── selector de partido activo para fases 2/3/4 ──────────────────────────
-    partidos_list = get_partidos()
-    jugadores     = get_jugadores()
-    nombres       = jugadores['nombre'].tolist()
-
-    # ── Botón Nuevo Partido ───────────────────────────────────────────────
-    col_np, col_info = st.columns([2, 5])
-    with col_np:
-        if st.button("➕ NUEVO PARTIDO", type="primary", key="btn_nuevo_partido"):
-            # Limpiar todo el estado del formulario de partido
-            keys_limpiar = [k for k in st.session_state.keys()
-                            if any(k.startswith(p) for p in [
-                                'f1_', 'f2_', 'f3_', 'f4_', 'sel_f',
-                                'tarjetas_f2_', 'multa_am_', 'multa_dam_',
-                                'multa_ro_', 'ntj_', 'ntt_', 'ntm_', 'add_tarj_',
-                                'ultimo_pid', 'f1_draft'
-                            ])]
-            for k in keys_limpiar:
-                del st.session_state[k]
-            st.success("✅ Formulario limpio. Ingresa los datos del nuevo partido.")
-            st.cache_data.clear(); st.rerun()
-    with col_info:
-        if partidos_list is not None and len(partidos_list) > 0:
-            ult = partidos_list.iloc[0]
-            st.markdown(f"<small style='color:#7a3030;'>Último partido registrado: "
-                        f"<b>{ult['fecha']} vs {ult['rival']}</b> — "
-                        f"{int(ult['goles_favor'] or 0)}:{int(ult['goles_contra'] or 0)}</small>",
-                        unsafe_allow_html=True)
-
-    st.markdown("---")
-
-    # ════════════════════════════════════════════════════════════════════
-    # FASE 1 — ALINEACIÓN (antes del partido)
-    # ════════════════════════════════════════════════════════════════════
-    fase_header(1, "ALINEACIÓN", "Antes del partido — registra los jugadores y guarda", "#1a5c8a")
-
-    # ── Borrador automático en session_state ─────────────────────────────
-    # Los campos se guardan en memoria automáticamente mientras escribes.
-    # Si refrescas la página se pierden, pero si el servidor sigue corriendo
-    # (pérdida de internet breve) los datos se conservan.
-    if 'f1_draft' not in st.session_state:
-        st.session_state['f1_draft'] = {}
-    draft = st.session_state['f1_draft']
-
-    f1c1, f1c2, f1c3 = st.columns(3)
-    with f1c1:
-        f1_fecha = st.date_input("Fecha", value=date.today(), key="f1_fecha")
-        f1_rival = st.text_input("Rival", key="f1_rival",
-                                  value=draft.get('rival',''))
-    with f1c2:
-        f1_cancha  = st.text_input("Cancha / Lugar", key="f1_cancha",
-                                    value=draft.get('cancha',''))
-        f1_arb     = st.number_input("Costo árbitro ($)", min_value=0.0, step=0.5, key="f1_arb",
-                                      value=draft.get('arb', 0.0))
-        f1_agua    = st.number_input("Costo botellón ($)", min_value=0.0, step=0.5, key="f1_agua",
-                                      value=draft.get('agua', 0.0))
-    with f1c3:
-        f1_monto   = st.number_input("💰 Cuota por jugador ($)", min_value=0.0, step=0.5, key="f1_monto",
-                        value=draft.get('monto', 0.0),
-                        help="Monto que paga cada jugador NO exento. Ajustable después por jugador.")
-
-    # Guardar borrador automáticamente al cambiar cualquier campo
-    st.session_state['f1_draft'] = {
-        'rival': f1_rival, 'cancha': f1_cancha,
-        'arb': f1_arb, 'agua': f1_agua, 'monto': f1_monto
+    [data-testid="stSidebar"] [data-testid="stFileUploaderDropzone"] {
+        background: rgba(255,255,255,0.06) !important;
+        border: 1px dashed rgba(255,255,255,0.2) !important;
     }
-
-    st.markdown("**⚽ Titulares — arma tu alineación**")
-    st.caption("Elige quién juega en cada línea. Puedes poner a cualquier jugador donde necesites.")
-
-    if 'f1_draft' in st.session_state and 'titulares' in st.session_state['f1_draft']:
-        st.session_state['f1_draft']['titulares'] = [n for n in st.session_state['f1_draft']['titulares'] if n in nombres]
-
-    default_tit = [n for n in draft.get('titulares', []) if n in nombres]
-
-    # Selectores por línea — cualquier jugador en cualquier línea
-    lineas = [
-        ("🧤 Arquero(s)",     "f1_arq"),
-        ("🛡️ Defensa(s)",     "f1_def"),
-        ("⚙️ Volante(s)",     "f1_vol"),
-        ("⚽ Delantero(s)",   "f1_del"),
-    ]
-
-    f1_titulares = []
-    ya_sel = set()
-
-    for label, key in lineas:
-        # Opciones: todos los jugadores no seleccionados aún + los que ya están en esta línea
-        default_linea = st.session_state.get(key + "_val", [])
-        default_linea = [n for n in default_linea if n in nombres]
-        disponibles   = [n for n in nombres if n not in ya_sel or n in default_linea]
-        sel = st.multiselect(label, disponibles, default=default_linea, key=key)
-        st.session_state[key + "_val"] = sel
-        f1_titulares.extend(sel)
-        ya_sel.update(sel)
-
-    # Quitar duplicados
-    seen = set(); f1_titulares = [n for n in f1_titulares if not (n in seen or seen.add(n))]
-    st.session_state['f1_draft']['titulares'] = f1_titulares
-
-    # Validación
-    n_tit = len(f1_titulares)
-    if n_tit > 11:
-        st.error(f"⚠️ Tienes {n_tit} jugadores. El máximo es 11. Quita {n_tit-11}.")
-    elif n_tit == 11:
-        st.success("✅ 11 titulares — alineación completa.")
-    elif n_tit > 0:
-        st.caption(f"{n_tit}/11 jugadores seleccionados.")
-
-    # Resumen
-    if n_tit > 0:
-        partes = []
-        for label, key in lineas:
-            sel = st.session_state.get(key + "_val", [])
-            if sel:
-                partes.append(f"<b>{label}:</b> {', '.join(sel)}")
-        st.markdown("<div style='background:#f5f0f0;border:1px solid #d4a0a0;border-radius:8px;"
-                    "padding:10px 14px;font-size:13px;line-height:1.8;'>" +
-                    "<br>".join(partes) + "</div>", unsafe_allow_html=True)
-
-    # ── Alertas de suspensión en tiempo real ─────────────────────────────
-    suspendidos_en_lista = []
-    en_riesgo_en_lista   = []
-    for nombre in f1_titulares:
-        rows = jugadores[jugadores['nombre']==nombre]
-        if len(rows) == 0: continue
-        jid = int(rows.iloc[0]['id'])
-        sancion = esta_sancionado(jid)
-        if "Suspendido" in sancion:
-            suspendidos_en_lista.append((nombre, sancion))
-        elif "riesgo" in sancion:
-            en_riesgo_en_lista.append((nombre, sancion))
-
-    if suspendidos_en_lista:
-        for nombre, sancion in suspendidos_en_lista:
-            st.markdown(f'<div class="peligro-box">🚫 <b>{nombre}</b> está <b>SUSPENDIDO</b> — {sancion.replace("🔴 Suspendido — ","")}<br>'
-                        f'<small>No puede jugar. Quítalo de la alineación.</small></div>',
-                        unsafe_allow_html=True)
-    if en_riesgo_en_lista:
-        for nombre, sancion in en_riesgo_en_lista:
-            st.markdown(f'<div class="alerta-box">⚠️ <b>{nombre}</b> — {sancion}<br>'
-                        f'<small>Puede jugar pero cuidado con las tarjetas.</small></div>',
-                        unsafe_allow_html=True)
-
-    st.info("💡 Los cambios (quién sale y quién entra) se registran en la **Fase 2** después de guardar la alineación.")
-    f1_entraron = []
-    cambios_data = []
-
-    if st.button("💾 GUARDAR ALINEACIÓN", type="primary", key="btn_fase1"):
-        if not f1_rival.strip():
-            st.error("⚠️ Ingresa el nombre del rival.")
-        elif n_tit == 0:
-            st.error("⚠️ Selecciona al menos un titular.")
-        elif n_tit > 11:
-            st.error(f"⚠️ Máximo 11 titulares. Tienes {n_tit}, quita {n_tit-11}.")
-        elif suspendidos_en_lista:
-            nombres_susp = ", ".join([n for n, _ in suspendidos_en_lista])
-            st.error(f"🚫 No puedes guardar la alineación. Jugador(es) suspendido(s): {nombres_susp}. Quítalos antes de guardar.")
-        else:
-            # ── Validar partido duplicado (misma fecha + mismo rival) ───
-            duplicado = q("""SELECT id FROM partidos
-                             WHERE fecha=%s AND LOWER(rival)=LOWER(%s)""",
-                          (str(f1_fecha), f1_rival.strip()))
-            if len(duplicado) > 0:
-                st.error(f"⚠️ Ya existe un partido registrado el {f1_fecha} contra '{f1_rival.strip()}'. "
-                         f"Revisa el Historial o elige otra fecha.")
-            else:
-                conn = get_conn(); c = conn.cursor()
-                c.execute("""INSERT INTO partidos (fecha,rival,cancha,goles_favor,goles_contra,
-                             costo_arbitraje,costo_agua,notas) VALUES (%s,%s,%s,0,0,%s,%s,%s)
-                             RETURNING id""",
-                          (str(f1_fecha), f1_rival.strip(), f1_cancha, f1_arb, f1_agua, ""))
-                row = c.fetchone()
-                pid = int(row[0]) if row else None
-                if not pid:
-                    st.error("❌ Error al crear el partido. Intenta de nuevo.")
-                    conn.close()
-                    st.stop()
-                # Titulares
-                for nombre in f1_titulares:
-                    jrow = jugadores[jugadores['nombre']==nombre].iloc[0]
-                    c.execute("INSERT INTO participaciones (partido_id,jugador_id,rol) VALUES (%s,%s,%s)",
-                              (pid, int(jrow['id']), 'titular'))
-                # Cambios: registrar participación del que entra y guardar el cambio
-                for sale, entra, min_c in cambios_data:
-                    jrow_entra = jugadores[jugadores['nombre']==entra]
-                    jrow_sale  = jugadores[jugadores['nombre']==sale]
-                    if len(jrow_entra)>0:
-                        c.execute("INSERT INTO participaciones (partido_id,jugador_id,rol) VALUES (%s,%s,%s)",
-                                  (pid, int(jrow_entra.iloc[0]['id']), 'cambio'))
-                    if len(jrow_entra)>0 and len(jrow_sale)>0:
-                        c.execute("""INSERT INTO cambios (partido_id,jugador_sale_id,jugador_entra_id,minuto)
-                                     VALUES (%s,%s,%s,%s)""",
-                                  (pid, int(jrow_sale.iloc[0]['id']),
-                                   int(jrow_entra.iloc[0]['id']), min_c))
-                # Cobros pendientes para no exentos
-                participantes = list(set(f1_titulares + f1_entraron))
-                for nombre in participantes:
-                    jrow = jugadores[jugadores['nombre']==nombre].iloc[0]
-                    if not bool(jrow['exento_arbitraje']) and f1_monto > 0:
-                        c.execute("INSERT INTO pagos (partido_id,jugador_id,monto,pagado) VALUES (%s,%s,%s,0)",
-                                  (pid, int(jrow['id']), f1_monto))
-                if f1_arb + f1_agua > 0:
-                    c.execute("INSERT INTO caja (partido_id,concepto,monto,fecha) VALUES (%s,%s,%s,%s)",
-                              (pid, f"Gastos partido vs {f1_rival.strip()}", -(f1_arb+f1_agua), str(f1_fecha)))
-                conn.commit(); release_conn(conn)
-                guardar_db_en_github()
-                # Limpiar borrador y guardar el pid del partido recién creado
-                st.session_state['f1_draft'] = {}
-                st.session_state['ultimo_pid'] = pid
-                # Limpiar selectbox de fase 2 y 3 para que el index funcione
-                for k in ['sel_f2', 'sel_f3']:
-                    if k in st.session_state:
-                        del st.session_state[k]
-                st.success(f"✅ Alineación guardada — {n_tit} titulares. "
-                           f"Fase 2 ya apunta a este partido.")
-                st.cache_data.clear(); st.rerun()
-
-    st.markdown("---")
-
-    # ════════════════════════════════════════════════════════════════════
-    # FASE 2 — EVENTOS DEL PARTIDO (goles y tarjetas)
-    # ════════════════════════════════════════════════════════════════════
-    fase_header(2, "EVENTOS DEL PARTIDO", "Durante o al terminar — goles, tarjetas y resultado final", "#6b3010")
-
-    if len(partidos_list) == 0:
-        st.info("Primero guarda una alineación en la Fase 1.")
-    else:
-        opciones_f2 = ["— Selecciona un partido —"] + [f"{r['fecha']} vs {r['rival']}" for _, r in partidos_list.iterrows()]
-        sel_f2 = st.selectbox("Selecciona el partido", opciones_f2, key="sel_f2", index=0)
-
-        if sel_f2 == "— Selecciona un partido —":
-            st.info("Selecciona el partido que acabas de guardar en la Fase 1.")
-        else:
-            pid_f2 = int(partidos_list.iloc[opciones_f2[1:].index(sel_f2)]['id'])
-            p_data = partidos_list[partidos_list['id']==pid_f2].iloc[0]
-
-            # Participantes titulares de este partido
-            partic_f2 = q("""SELECT j.nombre, pa.rol FROM participaciones pa
-                             JOIN jugadores j ON pa.jugador_id=j.id
-                             WHERE pa.partido_id=%s""", (pid_f2,))
-            nombres_f2 = partic_f2['nombre'].tolist() if len(partic_f2)>0 else nombres
-            titulares_f2 = partic_f2[partic_f2['rol']=='titular']['nombre'].tolist() if len(partic_f2)>0 else []
-
-            # ── Cambios del partido ──────────────────────────────────────────
-            st.markdown("**🔄 Cambios del partido** *(quién sale, quién entra y a qué minuto)*")
-
-            # Cargar cambios ya guardados
-            cambios_guardados = q("""SELECT js.nombre as sale, je.nombre as entra, c.minuto
-                                     FROM cambios c
-                                     JOIN jugadores js ON c.jugador_sale_id=js.id
-                                     JOIN jugadores je ON c.jugador_entra_id=je.id
-                                     WHERE c.partido_id=%s ORDER BY c.minuto""", (pid_f2,))
-            n_cambios_guardados = len(cambios_guardados)
-
-            n_cambios_f2 = st.number_input("¿Cuántos cambios hubo?", min_value=0, max_value=5,
-                                            value=n_cambios_guardados, step=1, key="f2_ncambios")
-            cambios_data_f2 = []
-            nombres_ya_entran_f2 = []
-            # Nombres disponibles para salir = titulares del partido
-            disp_sale = titulares_f2 if titulares_f2 else nombres
-            # Nombres disponibles para entrar = NO titulares
-            disp_entra_base = [n for n in nombres if n not in titulares_f2]
-
-            for i in range(int(n_cambios_f2)):
-                st.markdown(f"<small style='color:#7a3030;'>Cambio #{i+1}</small>", unsafe_allow_html=True)
-                # Valores por defecto desde cambios ya guardados
-                default_sale  = str(cambios_guardados.iloc[i]['sale'])  if i < n_cambios_guardados else (disp_sale[0] if disp_sale else nombres[0])
-                default_entra = str(cambios_guardados.iloc[i]['entra']) if i < n_cambios_guardados else None
-                default_min   = int(cambios_guardados.iloc[i]['minuto']) if i < n_cambios_guardados and cambios_guardados.iloc[i]['minuto'] else 45
-
-                cc1, cc2, cc3 = st.columns([3, 3, 1])
-                with cc1:
-                    idx_sale = disp_sale.index(default_sale) if default_sale in disp_sale else 0
-                    sale_f2 = st.selectbox("Sale ↗️", disp_sale, index=idx_sale, key=f"f2_sale_{i}")
-                with cc2:
-                    disp_entra = [n for n in disp_entra_base if n not in nombres_ya_entran_f2]
-                    if not disp_entra: disp_entra = nombres
-                    idx_entra = disp_entra.index(default_entra) if default_entra and default_entra in disp_entra else 0
-                    entra_f2 = st.selectbox("Entra ↘️", disp_entra, index=idx_entra, key=f"f2_entra_{i}")
-                with cc3:
-                    min_f2 = st.number_input("Min.", min_value=1, max_value=120,
-                                              value=default_min, key=f"f2_minc_{i}")
-                cambios_data_f2.append((sale_f2, entra_f2, min_f2))
-                nombres_ya_entran_f2.append(entra_f2)
-                # Alerta si el jugador que entra está suspendido
-                rows_entra = jugadores[jugadores['nombre']==entra_f2]
-                if len(rows_entra) > 0:
-                    sanc_entra = esta_sancionado(int(rows_entra.iloc[0]['id']))
-                    if "Suspendido" in sanc_entra:
-                        st.markdown(f'<div class="peligro-box">🚫 <b>{entra_f2}</b> está <b>SUSPENDIDO</b> — {sanc_entra.replace("🔴 Suspendido — ","")}<br>'
-                                    f'<small>No puede ingresar al partido.</small></div>',
-                                    unsafe_allow_html=True)
-
-            # Resultado
-            f2c1, f2c2 = st.columns(2)
-            with f2c1:
-                f2_gf = st.number_input("Goles a favor ⚽", min_value=0, step=1,
-                                        value=int(p_data['goles_favor'] or 0), key="f2_gf")
-            with f2c2:
-                f2_gc = st.number_input("Goles en contra 🥅", min_value=0, step=1,
-                                        value=int(p_data['goles_contra'] or 0), key="f2_gc")
-
-            # Goleadores
-            if f2_gf > 0:
-                st.markdown("**⚽ ¿Quién anotó cada gol?**")
-                nombres_con_desc = nombres_f2 + ["⬛ Desconocido / propia puerta"]
-                goles_nuevos = []
-                for i in range(int(f2_gf)):
-                    gc1, gc2 = st.columns([4, 1])
-                    with gc1:
-                        gol_jug = st.selectbox(f"Gol #{i+1}", nombres_con_desc, key=f"f2_gol_{i}")
-                    with gc2:
-                        gol_min = st.number_input("Min.", min_value=1, max_value=120,
-                                                  value=1, key=f"f2_min_{i}")
-                    goles_nuevos.append((gol_jug, gol_min))
-
-            # Tarjetas — sistema de tarjetas individuales
-            st.markdown("**🟨🟥 Tarjetas del partido**")
-            st.caption("Agrega una fila por cada tarjeta. Si un jugador recibe 2 amarillas en el mismo partido = doble amarilla automática.")
-
-            # Inicializar lista de tarjetas en session_state
-            key_tarj = f"tarjetas_f2_{pid_f2}"
-            if key_tarj not in st.session_state:
-                # Cargar tarjetas ya guardadas de este partido
-                tarj_existentes = q("""SELECT t.tipo, j.nombre FROM tarjetas t
-                                       JOIN jugadores j ON t.jugador_id=j.id
-                                       WHERE t.partido_id=%s ORDER BY t.id""", (pid_f2,))
-                st.session_state[key_tarj] = [
-                    {"jugador": row['nombre'], "tipo": row['tipo'], "minuto": 1}
-                    for _, row in tarj_existentes.iterrows()
-                ] if len(tarj_existentes) > 0 else []
-
-            # Multas por tarjeta
-            key_multa_am  = f"multa_am_{pid_f2}"
-            key_multa_dam = f"multa_dam_{pid_f2}"
-            key_multa_ro  = f"multa_ro_{pid_f2}"
-            key_partidos_ro = f"partidos_ro_{pid_f2}"
-            mc1, mc2, mc3, mc4 = st.columns(4)
-            with mc1:
-                multa_amarilla = st.number_input("💰 Multa amarilla ($)", min_value=0.0,
-                    step=0.5, key=key_multa_am, value=0.0,
-                    help="Monto que paga el jugador por 1 amarilla simple")
-            with mc2:
-                multa_dam = st.number_input("💰 Multa doble amarilla ($)", min_value=0.0,
-                    step=0.5, key=key_multa_dam, value=0.0,
-                    help="Monto que paga el jugador por doble amarilla")
-            with mc3:
-                multa_roja = st.number_input("💰 Multa roja directa ($)", min_value=0.0,
-                    step=0.5, key=key_multa_ro, value=0.0,
-                    help="Monto que paga el jugador por roja directa")
-            with mc4:
-                partidos_roja = st.number_input("🚫 Partidos suspensión roja", min_value=1, max_value=10,
-                    step=1, value=st.session_state.get(key_partidos_ro, 2), key=key_partidos_ro,
-                    help="Por defecto 2. Aumenta si la falta fue grave (reincidente, agresión, etc.)")
-
-            # Mostrar tarjetas actuales
-            tarjetas_actuales = st.session_state[key_tarj]
-            if tarjetas_actuales:
-                st.markdown("<small style='color:#7a3030;'>Tarjetas registradas:</small>", unsafe_allow_html=True)
-                to_remove = []
-                for i, t in enumerate(tarjetas_actuales):
-                    tc1, tc2, tc3, tc4 = st.columns([3, 2, 1, 1])
-                    with tc1:
-                        st.markdown(f"**{t['jugador']}**")
-                    with tc2:
-                        tipo_emoji = "🟨" if t['tipo']=='amarilla' else "🟥"
-                        st.markdown(f"{tipo_emoji} {t['tipo'].capitalize()}")
-                    with tc3:
-                        st.markdown(f"min. {t['minuto']}")
-                    with tc4:
-                        if st.button("✕", key=f"rm_tarj_{i}_{pid_f2}"):
-                            to_remove.append(i)
-                for idx in reversed(to_remove):
-                    st.session_state[key_tarj].pop(idx)
-                if to_remove:
-                    st.cache_data.clear(); st.rerun()
-
-                # Detectar y mostrar dobles amarillas
-                from collections import Counter
-                conteo_por_jugador = Counter(
-                    t['jugador'] for t in tarjetas_actuales if t['tipo']=='amarilla'
-                )
-                for jugador, cant in conteo_por_jugador.items():
-                    if cant >= 2:
-                        st.markdown(f'<div class="alerta-box">🟨🟨 <b>{jugador}</b> tiene {cant} amarillas en este partido → <b>doble amarilla</b> (1 partido suspensión)</div>',
-                                    unsafe_allow_html=True)
-
-            # Agregar nueva tarjeta
-            st.markdown("<small style='color:#7a3030;'>Agregar tarjeta:</small>", unsafe_allow_html=True)
-            na1, na2, na3, na4 = st.columns([3, 2, 1, 1])
-            with na1:
-                nueva_tarj_jug = st.selectbox("Jugador", nombres_f2, key=f"ntj_{pid_f2}")
-            with na2:
-                nueva_tarj_tipo = st.selectbox("Tipo", ["amarilla", "roja"], key=f"ntt_{pid_f2}")
-            with na3:
-                nueva_tarj_min = st.number_input("Min.", min_value=1, max_value=120,
-                                                 value=st.session_state.get(f"ntm_{pid_f2}", 1),
-                                                 key=f"ntm_{pid_f2}")
-            with na4:
-                st.markdown("<br>", unsafe_allow_html=True)
-                if st.button("➕ Agregar", key=f"add_tarj_{pid_f2}"):
-                    # Leer el minuto directamente del session_state para asegurar el valor correcto
-                    min_capturado = st.session_state.get(f"ntm_{pid_f2}", 1)
-                    st.session_state[key_tarj].append({
-                        "jugador": st.session_state.get(f"ntj_{pid_f2}", nueva_tarj_jug),
-                        "tipo":    st.session_state.get(f"ntt_{pid_f2}", nueva_tarj_tipo),
-                        "minuto":  min_capturado
-                    })
-                    st.cache_data.clear(); st.rerun()
-
-            f2_notas = st.text_area("📝 Notas del partido", height=60,
-                                    value=str(p_data['notas'] or ""), key="f2_notas")
-
-            st.markdown("**📋 Comentarios del informe arbitral**")
-            st.caption("Observaciones del árbitro, incidencias, protestas, decisiones polémicas, etc.")
-            f2_arbitral = st.text_area("Informe arbitral", height=80,
-                                       value=str(p_data.get('informe_arbitral', '') or ""),
-                                       key="f2_arbitral",
-                                       placeholder="Ej: El árbitro anuló un gol por fuera de juego en el min. 67. Hubo protestas por la tarjeta roja de Santiago. El partido se detuvo 3 minutos por lluvia...")
-
-            # Vista previa de sanciones
-            tarjetas_preview = st.session_state.get(key_tarj, [])
-            if tarjetas_preview:
-                from collections import Counter
-                st.markdown("**⚠️ Sanciones que se generarán al guardar:**")
-                conteo_am = Counter(t['jugador'] for t in tarjetas_preview if t['tipo']=='amarilla')
-                for nombre, cant in conteo_am.items():
-                    if cant >= 2:
-                        st.markdown(f"&nbsp;&nbsp;🟨🟨 **{nombre}** — doble amarilla → 1 partido suspensión")
-                    else:
-                        rows = jugadores[jugadores['nombre']==nombre]
-                        if len(rows)>0:
-                            act = tarjetas_amarillas_activas(int(rows.iloc[0]['id']))
-                            if act+1 >= 5:
-                                st.markdown(f"&nbsp;&nbsp;🟨 **{nombre}** — llega a 5 amarillas → 1 partido suspensión")
-                            else:
-                                st.markdown(f"&nbsp;&nbsp;🟨 **{nombre}** — amarilla #{act+1} (sin suspensión aún)")
-                for t in tarjetas_preview:
-                    if t['tipo'] == 'roja':
-                        n_part_ro = st.session_state.get(key_partidos_ro, 2)
-                        st.markdown(f"&nbsp;&nbsp;🟥 **{t['jugador']}** — roja directa → **{n_part_ro} partido(s)** suspensión")
-
-            if st.button("💾 GUARDAR EVENTOS", type="primary", key="btn_fase2"):
-                from collections import Counter
-                tarjetas_guardar = st.session_state.get(key_tarj, [])
-                conn = get_conn(); c = conn.cursor()
-
-                # Actualizar resultado, notas e informe arbitral
-                c.execute("UPDATE partidos SET goles_favor=%s,goles_contra=%s,notas=%s,informe_arbitral=%s WHERE id=%s",
-                          (f2_gf, f2_gc, f2_notas, f2_arbitral, pid_f2))
-
-                # Borrar cambios anteriores y reinsertar desde Fase 2
-                c.execute("DELETE FROM cambios WHERE partido_id=%s", (pid_f2,))
-                # Obtener cuota ORIGINAL del partido (monto máximo registrado = cuota completa)
-                p_cuota = q("""SELECT MAX(pg.monto) as monto FROM pagos pg
-                               WHERE pg.partido_id=%s""", (pid_f2,))
-                monto_cuota = float(p_cuota.iloc[0]['monto']) if len(p_cuota) > 0 and p_cuota.iloc[0]['monto'] else 0.0
-
-                for sale_n, entra_n, min_c in cambios_data_f2:
-                    jrow_sale  = jugadores[jugadores['nombre']==sale_n]
-                    jrow_entra = jugadores[jugadores['nombre']==entra_n]
-                    if len(jrow_sale)>0 and len(jrow_entra)>0:
-                        jid_entra = int(jrow_entra.iloc[0]['id'])
-                        existe_partic = q("SELECT id FROM participaciones WHERE partido_id=%s AND jugador_id=%s",
-                                   (pid_f2, jid_entra))
-                        if len(existe_partic)==0:
-                            c.execute("INSERT INTO participaciones (partido_id,jugador_id,rol) VALUES (%s,%s,%s)",
-                                      (pid_f2, jid_entra, 'cambio'))
-                        # Crear cobro de cuota para el suplente si no tiene uno y no es exento
-                        existe_pago = q("SELECT id FROM pagos WHERE partido_id=%s AND jugador_id=%s",
-                                        (pid_f2, jid_entra))
-                        exento = bool(jrow_entra.iloc[0]['exento_arbitraje'])
-                        if len(existe_pago)==0 and not exento and monto_cuota > 0:
-                            c.execute("INSERT INTO pagos (partido_id,jugador_id,monto,pagado) VALUES (%s,%s,%s,0)",
-                                      (pid_f2, jid_entra, monto_cuota))
-                        c.execute("""INSERT INTO cambios (partido_id,jugador_sale_id,jugador_entra_id,minuto)
-                                     VALUES (%s,%s,%s,%s)""",
-                                  (pid_f2, int(jrow_sale.iloc[0]['id']), jid_entra, min_c))
-
-                # Borrar goles anteriores y reinsertar
-                c.execute("DELETE FROM goles WHERE partido_id=%s", (pid_f2,))
-                if f2_gf > 0:
-                    for gol_jug, gol_min in goles_nuevos:
-                        if gol_jug == "⬛ Desconocido / propia puerta":
-                            c.execute("INSERT INTO goles (partido_id,jugador_id,minuto,tipo) VALUES (%s,NULL,%s,%s)",
-                                      (pid_f2, gol_min, 'desconocido'))
-                        else:
-                            rows = jugadores[jugadores['nombre']==gol_jug]
-                            if len(rows)>0:
-                                c.execute("INSERT INTO goles (partido_id,jugador_id,minuto,tipo) VALUES (%s,%s,%s,%s)",
-                                          (pid_f2, int(rows.iloc[0]['id']), gol_min, 'normal'))
-
-                # Borrar tarjetas, sanciones y multas anteriores de este partido
-                c.execute("DELETE FROM tarjetas WHERE partido_id=%s", (pid_f2,))
-                c.execute("DELETE FROM sanciones WHERE partido_origen_id=%s", (pid_f2,))
-                c.execute("DELETE FROM multas WHERE partido_id=%s", (pid_f2,))
-
-                # Insertar tarjetas individuales + sanciones + multas
-                conteo_am_g = Counter(t['jugador'] for t in tarjetas_guardar if t['tipo']=='amarilla')
-                sanciones_gen = []
-                jugadores_multa_am_procesados = set()
-                jugadores_multa_ro_procesados = set()
-
-                for t in tarjetas_guardar:
-                    rows = jugadores[jugadores['nombre']==t['jugador']]
-                    if len(rows)==0: continue
-                    jid = int(rows.iloc[0]['id'])
-                    c.execute("INSERT INTO tarjetas (partido_id,jugador_id,tipo,cumplida) VALUES (%s,%s,%s,0)",
-                              (pid_f2, jid, t['tipo']))
-
-                    # ── Multa AMARILLA: el club la paga al árbitro ese día → gasto inmediato
-                    if t['tipo'] == 'amarilla' and t['jugador'] not in jugadores_multa_am_procesados:
-                        es_doble = conteo_am_g.get(t['jugador'], 0) >= 2
-                        if es_doble:
-                            monto_m    = st.session_state.get(key_multa_dam, 0.0)
-                            concepto_m = f"Multa doble amarilla vs {p_data['rival']}"
-                        else:
-                            monto_m    = st.session_state.get(key_multa_am, 0.0)
-                            concepto_m = f"Multa amarilla vs {p_data['rival']}"
-                        if monto_m > 0:
-                            c.execute("""INSERT INTO multas (partido_id,jugador_id,concepto,monto,monto_pagado,pagado)
-                                         VALUES (%s,%s,%s,%s,0,0)""",
-                                      (pid_f2, jid, concepto_m, monto_m))
-                            # Gasto: el club pagó la multa al árbitro en el partido
-                            c.execute("INSERT INTO caja (partido_id,concepto,monto,fecha) VALUES (%s,%s,%s,%s)",
-                                      (pid_f2, f"Gasto multa {t['jugador']} ({concepto_m})",
-                                       -monto_m, str(date.today())))
-                        jugadores_multa_am_procesados.add(t['jugador'])
-
-                    # ── Multa ROJA: NO se paga al árbitro ese día, el jugador la paga
-                    #    cuando cumple su sanción → solo se registra la deuda, sin gasto de caja
-                    if t['tipo'] == 'roja' and t['jugador'] not in jugadores_multa_ro_procesados:
-                        monto_m = st.session_state.get(key_multa_ro, 0.0)
-                        if monto_m > 0:
-                            concepto_ro = f"Multa roja directa vs {p_data['rival']}"
-                            c.execute("""INSERT INTO multas (partido_id,jugador_id,concepto,monto,monto_pagado,pagado)
-                                         VALUES (%s,%s,%s,%s,0,0)""",
-                                      (pid_f2, jid, concepto_ro, monto_m))
-                            # NO hay gasto de caja — la multa la paga el jugador al cumplir sanción
-                        jugadores_multa_ro_procesados.add(t['jugador'])
-
-                # Sanciones según conteo final
-                for nombre, cant in conteo_am_g.items():
-                    rows = jugadores[jugadores['nombre']==nombre]
-                    if len(rows)==0: continue
-                    jid = int(rows.iloc[0]['id'])
-                    if cant >= 2:
-                        c.execute("""INSERT INTO sanciones (jugador_id,partido_origen_id,motivo,
-                                     partidos_suspension,partidos_cumplidos) VALUES (%s,%s,'doble_amarilla',1,0)""",
-                                  (jid, pid_f2))
-                        sanciones_gen.append(f"🟨🟨 {nombre}: 1 partido")
-                    else:
-                        total_s = amarillas_simples_total(jid) + 1
-                        if total_s % 5 == 0:
-                            c.execute("""INSERT INTO sanciones (jugador_id,partido_origen_id,motivo,
-                                         partidos_suspension,partidos_cumplidos) VALUES (%s,%s,'acumulacion_amarillas',1,0)""",
-                                      (jid, pid_f2))
-                            sanciones_gen.append(f"🟨×5 {nombre}: 1 partido")
-
-                for t in tarjetas_guardar:
-                    if t['tipo'] == 'roja':
-                        rows = jugadores[jugadores['nombre']==t['jugador']]
-                        if len(rows)==0: continue
-                        jid = int(rows.iloc[0]['id'])
-                        n_part_ro = st.session_state.get(key_partidos_ro, 2)
-                        c.execute("""INSERT INTO sanciones (jugador_id,partido_origen_id,motivo,
-                                     partidos_suspension,partidos_cumplidos) VALUES (%s,%s,'roja_directa',%s,0)""",
-                                  (jid, pid_f2, int(n_part_ro)))
-                        sanciones_gen.append(f"🟥 {t['jugador']}: {int(n_part_ro)} partido(s)")
-
-                conn.commit(); release_conn(conn)
-                guardar_db_en_github()
-                # Limpiar session_state de tarjetas de este partido
-                if key_tarj in st.session_state:
-                    del st.session_state[key_tarj]
-                res_str = "Ganado ✅" if f2_gf>f2_gc else ("Empate 🤝" if f2_gf==f2_gc else "Perdido ❌")
-                msg = f"✅ Eventos guardados — {f2_gf}:{f2_gc} ({res_str}). {len(tarjetas_guardar)} tarjeta(s)."
-                if sanciones_gen: msg += f" Sanciones: {' | '.join(sanciones_gen)}"
-                msg += " Ve a Fase 3 para registrar los cobros."
-                st.success(msg)
-                st.cache_data.clear(); st.rerun()
-
-    st.markdown("---")
-
-    # ════════════════════════════════════════════════════════════════════
-    # FASE 3 — COBROS (mismo día o después)
-    # ════════════════════════════════════════════════════════════════════
-    fase_header(3, "COBROS", "Registra cuánto pagó cada uno — los pendientes se acumulan partido a partido", "#1a5c2a")
-
-    partidos_list = get_partidos()
-    if len(partidos_list) == 0:
-        st.info("Aún no hay partidos registrados.")
-    else:
-        opciones_f3 = ["— Selecciona un partido —"] + [f"{r['fecha']} vs {r['rival']}" for _, r in partidos_list.iterrows()]
-        sel_f3 = st.selectbox("Selecciona el partido", opciones_f3, key="sel_f3", index=0)
-        if sel_f3 == "— Selecciona un partido —":
-            st.info("Selecciona el partido para registrar los cobros.")
-        else:
-            pid_f3 = int(partidos_list.iloc[opciones_f3[1:].index(sel_f3)]['id'])
-
-            # ── Auto-crear pagos para suplentes no exentos sin cuota ────────
-            monto_ref = q("SELECT MAX(monto) as m FROM pagos WHERE partido_id=%s", (pid_f3,))
-            monto_cuota_f3 = float(monto_ref.iloc[0]['m']) if len(monto_ref)>0 and monto_ref.iloc[0]['m'] else 0.0
-            if monto_cuota_f3 > 0:
-                suplentes_sin_pago = q("""
-                    SELECT pa.jugador_id FROM participaciones pa
-                    JOIN jugadores j ON j.id=pa.jugador_id
-                    WHERE pa.partido_id=%s AND pa.rol='cambio'
-                      AND j.exento_arbitraje=0
-                      AND pa.jugador_id NOT IN (
-                          SELECT jugador_id FROM pagos WHERE partido_id=%s
-                      )
-                """, (pid_f3, pid_f3))
-                if len(suplentes_sin_pago) > 0:
-                    conn_fix = get_conn()
-                    for _, sp in suplentes_sin_pago.iterrows():
-                        conn_fix.execute(
-                            "INSERT INTO pagos (partido_id,jugador_id,monto,pagado) VALUES (%s,%s,%s,0)",
-                            (pid_f3, int(sp['jugador_id']), monto_cuota_f3))
-                    conn_fix.commit(); conn_fix.close()
-                    st.cache_data.clear(); st.rerun()
-
-            # ── Lista completa de jugadores a cobrar ──────────────────────
-            # Incluye: todos con cuota + todos con multa pendiente (aunque sean exentos)
-            pagos_df = q("""
-                SELECT pg.id, j.nombre, j.id as jugador_id,
-                       pg.monto, COALESCE(pg.monto_pagado,0) as monto_pagado, pg.pagado,
-                       COALESCE(pa.rol,'N/D') as rol
-                FROM pagos pg
-                JOIN jugadores j ON pg.jugador_id=j.id
-                LEFT JOIN participaciones pa
-                    ON pa.jugador_id=pg.jugador_id AND pa.partido_id=pg.partido_id
-                WHERE pg.partido_id=%s
-                ORDER BY pa.rol DESC, j.nombre
-            """, (pid_f3,))
-
-            # Jugadores con multa pendiente que NO tienen registro en pagos (exentos de arbitraje)
-            solo_multas_df = q("""
-                SELECT DISTINCT j.id as jugador_id, j.nombre,
-                       COALESCE(pa.rol,'N/D') as rol
-                FROM multas m
-                JOIN jugadores j ON j.id=m.jugador_id
-                LEFT JOIN participaciones pa
-                    ON pa.jugador_id=m.jugador_id AND pa.partido_id=m.partido_id
-                WHERE m.partido_id=%s AND m.pagado=0
-                  AND m.jugador_id NOT IN (
-                      SELECT jugador_id FROM pagos WHERE partido_id=%s
-                  )
-                ORDER BY j.nombre
-            """, (pid_f3, pid_f3))
-
-            if len(pagos_df) > 0:
-                st.markdown("**⚽ Cobros del partido**")
-                # Totales: cuotas + multas de este partido
-                total_cuotas   = pagos_df['monto'].sum()
-                cobrado_cuotas = pagos_df['monto_pagado'].sum()
-
-                # Sumar multas de este partido
-                multas_partido = q("""SELECT COALESCE(SUM(monto),0) as t,
-                                             COALESCE(SUM(monto_pagado),0) as p
-                                      FROM multas WHERE partido_id=%s""", (pid_f3,))
-                total_multas_p   = float(multas_partido.iloc[0]['t'])
-                cobrado_multas_p = float(multas_partido.iloc[0]['p'])
-
-                total_partido    = total_cuotas + total_multas_p
-                cobrado_partido  = cobrado_cuotas + cobrado_multas_p
-                pend_partido     = total_partido - cobrado_partido
-
-                cp1,cp2,cp3 = st.columns(3)
-                with cp1:
-                    st.markdown(f"""<div class="metric-card"><div class="label">💰 Total a cobrar (cuotas + multas)</div>
-                        <div class="valor" style="font-size:24px;">${total_partido:,.2f}</div></div>""", unsafe_allow_html=True)
-                with cp2:
-                    st.markdown(f"""<div class="metric-card"><div class="label">✅ Cobrado</div>
-                        <div class="valor" style="font-size:24px;color:#007a30;">${cobrado_partido:,.2f}</div></div>""", unsafe_allow_html=True)
-                with cp3:
-                    st.markdown(f"""<div class="metric-card"><div class="label">⏳ Pendiente partido</div>
-                        <div class="valor" style="font-size:24px;color:#cc0000;">${pend_partido:,.2f}</div></div>""", unsafe_allow_html=True)
-
-                st.markdown("<small style='color:#7a3030;'>💡 Ingresa cuánto paga cada jugador. El <b>Total</b> incluye cuota árbitro + multas + deudas anteriores.</small>", unsafe_allow_html=True)
-                nuevos_pagos_cuota = {}
-                nuevas_multas = {}
-
-                # Cabecera de columnas
-                hc1, hc2, hc3, hc4, hc5, hc6 = st.columns([2.5, 1.2, 1.2, 1.2, 1.2, 1.5])
-                with hc1: st.markdown("<small style='color:#7a3030;font-weight:700;'>JUGADOR</small>", unsafe_allow_html=True)
-                with hc2: st.markdown("<small style='color:#7a3030;font-weight:700;'>CUOTA</small>", unsafe_allow_html=True)
-                with hc3: st.markdown("<small style='color:#7a3030;font-weight:700;'>MULTAS</small>", unsafe_allow_html=True)
-                with hc4: st.markdown("<small style='color:#7a3030;font-weight:700;'>ANTERIOR</small>", unsafe_allow_html=True)
-                with hc5: st.markdown("<small style='color:#7a3030;font-weight:700;'>TOTAL DEBE</small>", unsafe_allow_html=True)
-                with hc6: st.markdown("<small style='color:#7a3030;font-weight:700;'>PAGA AHORA</small>", unsafe_allow_html=True)
-                st.markdown("<hr style='margin:4px 0 8px 0; border-color:#d4a0a0;'>", unsafe_allow_html=True)
-
-                for _, row in pagos_df.iterrows():
-                    jid = int(row['jugador_id'])
-                    cuota_pendiente = float(row['monto']) - float(row['monto_pagado'])
-
-                    # Multas de ESTE partido
-                    multas_jug = q("""SELECT id, concepto, monto, COALESCE(monto_pagado,0) as mp
-                                      FROM multas WHERE jugador_id=%s AND pagado=0 AND partido_id=%s
-                                   """, (jid, pid_f3))
-                    multa_total_este = float(multas_jug['monto'].sum() - multas_jug['mp'].sum()) if len(multas_jug) > 0 else 0.0
-
-                    # Deuda de OTROS partidos
-                    deuda_ant_cuotas = float(q("""SELECT COALESCE(SUM(monto-COALESCE(monto_pagado,0)),0) as d
-                        FROM pagos WHERE jugador_id=%s AND pagado=0 AND partido_id!=%s""", (jid, pid_f3))['d'][0])
-                    deuda_ant_multas = float(q("""SELECT COALESCE(SUM(monto-COALESCE(monto_pagado,0)),0) as d
-                        FROM multas WHERE jugador_id=%s AND pagado=0 AND partido_id!=%s""", (jid, pid_f3))['d'][0])
-                    deuda_anterior = deuda_ant_cuotas + deuda_ant_multas
-                    deuda_total    = cuota_pendiente + multa_total_este + deuda_anterior
-
-                    rol_str = "Titular" if row['rol']=='titular' else ("Cambio" if row['rol']=='cambio' else "")
-                    color_tot = "#007a30" if deuda_total < 0.001 else "#cc0000"
-                    nombre_icon = " ✅" if deuda_total < 0.001 else ""
-
-                    rc1, rc2, rc3, rc4, rc5, rc6 = st.columns([2.5, 1.2, 1.2, 1.2, 1.2, 1.5])
-                    with rc1:
-                        st.markdown(f"<span style='font-weight:700;color:#1a0808;'>{row['nombre']}{nombre_icon}</span><br>"
-                                    f"<small style='color:#7a3030;'>{rol_str}</small>", unsafe_allow_html=True)
-                    with rc2:
-                        c = "#007a30" if cuota_pendiente < 0.001 else "#cc0000"
-                        st.markdown(f"<span style='color:{c};font-weight:700;'>${cuota_pendiente:,.2f}</span>", unsafe_allow_html=True)
-                    with rc3:
-                        c = "#007a30" if multa_total_este < 0.001 else "#b85000"
-                        st.markdown(f"<span style='color:{c};font-weight:700;'>${multa_total_este:,.2f}</span>", unsafe_allow_html=True)
-                    with rc4:
-                        c = "#007a30" if deuda_anterior < 0.001 else "#b85000"
-                        st.markdown(f"<span style='color:{c};font-weight:700;'>${deuda_anterior:,.2f}</span>", unsafe_allow_html=True)
-                    with rc5:
-                        st.markdown(f"<span style='color:{color_tot};font-weight:800;'>${deuda_total:,.2f}</span>", unsafe_allow_html=True)
-                    with rc6:
-                        if deuda_total > 0.001:
-                            paga_ahora = st.number_input("$", min_value=0.0,
-                                max_value=float(deuda_total), value=0.0, step=0.5,
-                                key=f"f3_cuota_{row['id']}", label_visibility="collapsed")
-                        else:
-                            st.markdown("<small style='color:#007a30;'>✅ Al día</small>", unsafe_allow_html=True)
-                            paga_ahora = 0.0
-
-                    nuevos_pagos_cuota[int(row['id'])] = (float(row['monto_pagado']), float(row['monto']),
-                                                          paga_ahora, cuota_pendiente, jid)
-                    # Guardar multas para pago proporcional
-                    for _, mrow in multas_jug.iterrows():
-                        nuevas_multas[int(mrow['id'])] = (float(mrow['mp']), float(mrow['monto']), paga_ahora)
-
-                    st.markdown("<hr style='margin:4px 0;border-color:#eeeeee;'>", unsafe_allow_html=True)
-
-                # ── Jugadores exentos de arbitraje pero con multas pendientes ──
-                for _, srow in solo_multas_df.iterrows():
-                    jid_s = int(srow['jugador_id'])
-                    multas_s = q("""SELECT id, concepto, monto, COALESCE(monto_pagado,0) as mp
-                                    FROM multas WHERE jugador_id=%s AND pagado=0 AND partido_id=%s
-                                 """, (jid_s, pid_f3))
-                    multa_tot_s = float(multas_s['monto'].sum() - multas_s['mp'].sum()) if len(multas_s)>0 else 0.0
-                    deuda_ant_s = float(q("""SELECT COALESCE(SUM(monto-COALESCE(monto_pagado,0)),0) as d
-                        FROM pagos WHERE jugador_id=%s AND pagado=0""", (jid_s,))['d'][0]) + \
-                                  float(q("""SELECT COALESCE(SUM(monto-COALESCE(monto_pagado,0)),0) as d
-                        FROM multas WHERE jugador_id=%s AND pagado=0 AND partido_id!=%s""", (jid_s, pid_f3))['d'][0])
-                    deuda_tot_s = multa_tot_s + deuda_ant_s
-                    rol_s = "Titular" if srow['rol']=='titular' else ("Cambio" if srow['rol']=='cambio' else "")
-                    color_tot_s = "#007a30" if deuda_tot_s < 0.001 else "#cc0000"
-
-                    rc1, rc2, rc3, rc4, rc5, rc6 = st.columns([2.5, 1.2, 1.2, 1.2, 1.2, 1.5])
-                    with rc1:
-                        st.markdown(f"<span style='font-weight:700;color:#1a0808;'>{srow['nombre']}</span><br>"
-                                    f"<small style='color:#7a3030;'>{rol_s} · Exento árb.</small>", unsafe_allow_html=True)
-                    with rc2:
-                        st.markdown(f"<span style='color:#007a30;font-weight:700;'>$0.00</span>", unsafe_allow_html=True)
-                    with rc3:
-                        c = "#007a30" if multa_tot_s < 0.001 else "#b85000"
-                        st.markdown(f"<span style='color:{c};font-weight:700;'>${multa_tot_s:,.2f}</span>", unsafe_allow_html=True)
-                    with rc4:
-                        c = "#007a30" if deuda_ant_s < 0.001 else "#b85000"
-                        st.markdown(f"<span style='color:{c};font-weight:700;'>${deuda_ant_s:,.2f}</span>", unsafe_allow_html=True)
-                    with rc5:
-                        st.markdown(f"<span style='color:{color_tot_s};font-weight:800;'>${deuda_tot_s:,.2f}</span>", unsafe_allow_html=True)
-                    with rc6:
-                        if deuda_tot_s > 0.001:
-                            paga_s = st.number_input("$", min_value=0.0, max_value=float(deuda_tot_s),
-                                value=0.0, step=0.5, key=f"f3_sm_{jid_s}", label_visibility="collapsed")
-                        else:
-                            st.markdown("<small style='color:#007a30;'>✅ Al día</small>", unsafe_allow_html=True)
-                            paga_s = 0.0
-                    # Leer el valor real del widget desde session_state
-                    paga_s_real = st.session_state.get(f"f3_sm_{jid_s}", paga_s)
-                    # Registrar multas para guardar con el valor real
-                    for _, mrow in multas_s.iterrows():
-                        nuevas_multas[int(mrow['id'])] = (float(mrow['mp']), float(mrow['monto']), paga_s_real)
-                    st.markdown("<hr style='margin:4px 0;border-color:#eeeeee;'>", unsafe_allow_html=True)
-
-            # ── Gasto / ingreso adicional ─────────────────────────────────────
-            st.markdown("**➕ Gasto / ingreso adicional del partido**")
-            ga1, ga2 = st.columns([3, 1])
-            with ga1:
-                f3_concepto = st.text_input("Concepto", key="f3_concepto",
-                    placeholder="Ej: Botellón extra, bono patrocinador…")
-            with ga2:
-                f3_monto_extra = st.number_input("Monto ($)", step=0.5, key="f3_monto_extra",
-                    help="Positivo = ingreso, Negativo = gasto")
-
-            if st.button("💾 GUARDAR COBROS", type="primary", key="btn_fase3"):
-                conn = get_conn()
-                cur = conn.cursor()
-                cambios = 0
-
-                # Cuotas con pago — puede pagar más que la deuda del partido actual
-                if len(pagos_df) > 0:
-                    for pid_p, (ya_pagado, monto_total, paga_ahora, deuda_partido, jid_pago) in nuevos_pagos_cuota.items():
-                        if paga_ahora <= 0:
-                            continue
-                        restante = paga_ahora
-
-                        # 1. Pagar primero la cuota de este partido
-                        pago_este = min(restante, monto_total - ya_pagado)
-                        if pago_este > 0:
-                            nuevo_total = ya_pagado + pago_este
-                            saldado = nuevo_total >= monto_total - 0.001
-                            cur.execute("UPDATE pagos SET monto_pagado=%s, pagado=%s WHERE id=%s",
-                                         (nuevo_total, int(saldado), pid_p))
-                            jn = q("SELECT nombre FROM jugadores WHERE id=%s", (jid_pago,)).iloc[0]['nombre']
-                            cur.execute("INSERT INTO caja (partido_id,concepto,monto,fecha) VALUES (%s,%s,%s,%s)",
-                                (pid_f3, f"Pago cuota {jn} — {sel_f3}" + ("" if saldado else " (parcial)"),
-                                 pago_este, str(date.today())))
-                            restante -= pago_este
-                            cambios += 1
-
-                        # 2. Si sobra, pagar deudas anteriores de otros partidos (más antiguas primero)
-                        if restante > 0.001:
-                            deudas_anteriores = q("""
-                                SELECT id, monto, COALESCE(monto_pagado,0) as mp, partido_id
-                                FROM pagos WHERE jugador_id=%s AND pagado=0 AND partido_id!=%s
-                                ORDER BY partido_id ASC
-                            """, (jid_pago, pid_f3))
-                            for _, da in deudas_anteriores.iterrows():
-                                if restante <= 0.001: break
-                                debe_da = float(da['monto']) - float(da['mp'])
-                                pago_da = min(restante, debe_da)
-                                nuevo_mp = float(da['mp']) + pago_da
-                                saldado_da = nuevo_mp >= float(da['monto']) - 0.001
-                                cur.execute("UPDATE pagos SET monto_pagado=%s, pagado=%s WHERE id=%s",
-                                             (nuevo_mp, int(saldado_da), int(da['id'])))
-                                jn = q("SELECT nombre FROM jugadores WHERE id=%s", (jid_pago,)).iloc[0]['nombre']
-                                cur.execute("INSERT INTO caja (partido_id,concepto,monto,fecha) VALUES (%s,%s,%s,%s)",
-                                    (pid_f3, f"Pago deuda anterior {jn} (partido {da['partido_id']})",
-                                     pago_da, str(date.today())))
-                                restante -= pago_da
-                                cambios += 1
-
-                # Multas — procesar pagos de multas
-                for multa_id, (ya_pagado_m, monto_total_m, paga_total_j) in nuevas_multas.items():
-                    if paga_total_j <= 0:
-                        continue
-                    mr = q("SELECT jugador_id, concepto FROM multas WHERE id=%s", (multa_id,)).iloc[0]
-                    jid_m = int(mr['jugador_id'])
-                    # Para jugadores con cuota: el excedente sobre la cuota va a multa
-                    # Para exentos (sin cuota): todo lo que pagan va directo a multa
-                    cuota_row = q("SELECT monto, COALESCE(monto_pagado,0) as mp FROM pagos WHERE partido_id=%s AND jugador_id=%s",
-                                  (pid_f3, jid_m))
-                    if len(cuota_row) > 0:
-                        cuota_original = float(cuota_row.iloc[0]['monto'])
-                        cuota_ya_pag   = float(cuota_row.iloc[0]['mp'])
-                        cuota_pend = max(0.0, cuota_original - cuota_ya_pag)
-                        pago_para_multa = max(0.0, paga_total_j - cuota_pend)
-                    else:
-                        # Exento: todo el pago es para la multa
-                        pago_para_multa = paga_total_j
-
-                    debe_multa = monto_total_m - ya_pagado_m
-                    pago_multa = min(pago_para_multa, debe_multa)
-                    if pago_multa > 0.001:
-                        nuevo_mp_m = ya_pagado_m + pago_multa
-                        saldado_m = nuevo_mp_m >= monto_total_m - 0.001
-                        cur.execute("UPDATE multas SET monto_pagado=%s, pagado=%s WHERE id=%s",
-                                     (nuevo_mp_m, int(saldado_m), multa_id))
-                        jn = q("SELECT nombre FROM jugadores WHERE id=%s", (jid_m,)).iloc[0]['nombre']
-                        cur.execute("INSERT INTO caja (partido_id,concepto,monto,fecha) VALUES (%s,%s,%s,%s)",
-                            (pid_f3, f"Multa {jn} — {mr['concepto']}" + ("" if saldado_m else " (parcial)"),
-                             pago_multa, str(date.today())))
-                        cambios += 1
-
-                if f3_concepto.strip():
-                    cur.execute("INSERT INTO caja (partido_id,concepto,monto,fecha) VALUES (%s,%s,%s,%s)",
-                        (pid_f3, f3_concepto.strip(), f3_monto_extra, str(date.today())))
-                    cambios += 1
-
-                conn.commit(); release_conn(conn)
-                guardar_db_en_github()
-                st.success(f"✅ {cambios} cobro(s) registrado(s). Los valores no pagados quedan como deuda acumulada.") if cambios else st.info("Sin cambios.")
-                if cambios: st.cache_data.clear(); st.rerun()
-
-    st.markdown("---")
-
-    # ════════════════════════════════════════════════════════════════════
-    # FASE 4 — SANCIONES (antes del próximo partido)
-    # ════════════════════════════════════════════════════════════════════
-    fase_header(4, "SANCIONES PENDIENTES", "Antes del próximo partido — marca suspensiones cumplidas", "#4a1060")
-
-    fase_header(4, "SANCIONES PENDIENTES", "Marca la suspensión DESPUÉS de que el jugador se pierda el partido", "#4a1060")
-
-    st.markdown('<div class="alerta-box" style="font-size:13px;">📋 <b>Cómo usar:</b> Cuando un jugador suspendido se pierde un partido, ven aquí y haz clic en <b>Marcar cumplida</b>. Si debe perderse 2 partidos, márcala cumplida 2 veces (una por cada partido perdido).</div>', unsafe_allow_html=True)
-
-    sanciones_df = q("""
-        SELECT s.id, j.nombre, s.motivo, s.partidos_suspension, s.partidos_cumplidos,
-               p.fecha, p.rival, (s.partidos_suspension-s.partidos_cumplidos) as restantes
-        FROM sanciones s JOIN jugadores j ON s.jugador_id=j.id
-        JOIN partidos p ON s.partido_origen_id=p.id
-        WHERE s.partidos_cumplidos<s.partidos_suspension ORDER BY p.fecha DESC
-    """)
-    if len(sanciones_df) == 0:
-        st.markdown('<div class="ok-box">✅ No hay suspensiones pendientes. Todos pueden jugar.</div>',
-                    unsafe_allow_html=True)
-    else:
-        st.markdown(f'<div class="peligro-box">🚫 <b>{len(sanciones_df)}</b> jugador(es) suspendido(s). '
-                    f'Marca como cumplida después de que se pierda el partido.</div>',
-                    unsafe_allow_html=True)
-        for _, s in sanciones_df.iterrows():
-            sc1, sc2 = st.columns([5, 2])
-            with sc1:
-                restantes = int(s['restantes'])
-                cumplidos = int(s['partidos_cumplidos'])
-                total_s   = int(s['partidos_suspension'])
-                progreso  = f"{cumplidos}/{total_s} partidos cumplidos"
-                motivo_str = MOTIVO_LABELS.get(s['motivo'], s['motivo'])
-                if s['motivo'] == 'roja_directa':
-                    motivo_str = f"🟥 Roja directa ({total_s} partido(s))"
-                st.markdown(
-                    f'<div class="peligro-box">🚫 <b>{s["nombre"]}</b> — {motivo_str}<br>'
-                    f'<small>Origen: partido vs <b>{s["rival"]}</b> ({s["fecha"]})<br>'
-                    f'Progreso: {progreso} — Faltan <b>{restantes} partido(s)</b> más por cumplir</small></div>',
-                    unsafe_allow_html=True)
-            with sc2:
-                kc = f"kc_{s['id']}"
-                if st.session_state.get(kc):
-                    st.markdown(f"<small style='color:#7a3030;'>¿Confirmas que <b>{s['nombre']}</b> se perdió un partido?</small>", unsafe_allow_html=True)
-                    if st.button("✅ Sí, cumplida", type="primary", key=f"cfm_{s['id']}"):
-                        run("UPDATE sanciones SET partidos_cumplidos=%s WHERE id=%s",
-                            (int(s['partidos_cumplidos'])+1, int(s['id'])))
-                        st.session_state[kc] = False
-                        nuevo_cumplido = int(s['partidos_cumplidos'])+1
-                        if nuevo_cumplido >= total_s:
-                            st.success(f"✅ {s['nombre']} ha cumplido su suspensión. Ya puede jugar.")
-                        else:
-                            st.info(f"Registrado. Le falta {total_s - nuevo_cumplido} partido(s) más.")
-                        st.cache_data.clear(); st.rerun()
-                    if st.button("❌ Cancelar", key=f"canc_{s['id']}"):
-                        st.session_state[kc] = False; st.cache_data.clear(); st.rerun()
-                else:
-                    if st.button(f"⬜ Marcar cumplida", key=f"mc_{s['id']}"):
-                        st.session_state[kc] = True; st.cache_data.clear(); st.rerun()
-
-    # Sanciones recientemente cumplidas (útil para verificar)
-    sanciones_ok = q("""
-        SELECT j.nombre, s.motivo, s.partidos_suspension, p.fecha, p.rival
-        FROM sanciones s JOIN jugadores j ON s.jugador_id=j.id
-        JOIN partidos p ON s.partido_origen_id=p.id
-        WHERE s.partidos_cumplidos>=s.partidos_suspension
-        ORDER BY p.fecha DESC LIMIT 5
-    """)
-    if len(sanciones_ok) > 0:
-        st.markdown("---")
-        st.markdown('<div class="section-header">✅ SUSPENSIONES CUMPLIDAS RECIENTEMENTE</div>', unsafe_allow_html=True)
-        for _, s in sanciones_ok.iterrows():
-            st.markdown(f"<small style='color:#007a30;'>✅ <b>{s['nombre']}</b> — {MOTIVO_LABELS.get(s['motivo'],s['motivo'])} (origen: vs {s['rival']} {s['fecha']}) — Cumplida</small>", unsafe_allow_html=True)
-
-# ══════════════════════════════════════════════════════════════════════════════
-# TAB 4 — FINANZAS
-# ══════════════════════════════════════════════════════════════════════════════
-if IS_ADMIN:
- with TAB_FINANZAS:
-    saldo = float(saldo_caja() or 0)
-    partidos = get_partidos()
-    c1, c2, c3 = st.columns(3)
-    with c1:
-        st.markdown(f"""<div class="metric-card"><div class="label">💰 Saldo Total en Caja</div>
-            <div class="valor">${saldo:,.0f}</div></div>""", unsafe_allow_html=True)
-    jugadores = get_jugadores()
-    total_deuda = sum(deuda_jugador(int(j['id'])) for _, j in jugadores.iterrows())
-    with c2:
-        st.markdown(f"""<div class="metric-card"><div class="label">⚠️ Total Deudas</div>
-            <div class="valor" style="color:#ff7b2e;">${total_deuda:,.0f}</div></div>""", unsafe_allow_html=True)
-    total_gastado = float(q("SELECT COALESCE(SUM(costo_arbitraje+costo_agua),0) as t FROM partidos")['t'][0] or 0)
-    with c3:
-        st.markdown(f"""<div class="metric-card"><div class="label">💸 Total Gastado</div>
-            <div class="valor" style="color:#cc0000;">${total_gastado:,.0f}</div></div>""", unsafe_allow_html=True)
-
-    st.markdown('<div class="section-header">📒 MOVIMIENTOS DE CAJA</div>', unsafe_allow_html=True)
-    caja_df = q("""SELECT c.fecha, c.concepto, c.monto,
-                   CASE WHEN c.monto>=0 THEN '✅ Ingreso' ELSE '❌ Gasto' END as tipo
-                   FROM caja c ORDER BY c.fecha DESC""")
-    if len(caja_df) > 0:
-        st.dataframe(caja_df, use_container_width=True, hide_index=True)
-    else:
-        st.info("Sin movimientos aún.")
-
-    st.markdown('<div class="section-header">➕ REGISTRAR GASTO / INGRESO MANUAL</div>', unsafe_allow_html=True)
-    with st.form("form_caja", clear_on_submit=True):
-        c1, c2, c3 = st.columns(3)
-        with c1: concepto_caja = st.text_input("Concepto")
-        with c2: monto_caja = st.number_input("Monto ($)", step=0.5, help="Positivo=ingreso, Negativo=gasto")
-        with c3: fecha_caja = st.date_input("Fecha", value=date.today(), key="fecha_caja")
-        if st.form_submit_button("💾 Registrar"):
-            if concepto_caja:
-                run("INSERT INTO caja (partido_id,concepto,monto,fecha) VALUES (%s,%s,%s,%s)",
-                    (None, concepto_caja, monto_caja, str(fecha_caja)))
-                st.success("✅ Movimiento registrado"); st.cache_data.clear(); st.rerun()
-
-    st.markdown('<div class="section-header">💸 DEUDAS POR JUGADOR</div>', unsafe_allow_html=True)
-    jugadores = get_jugadores()
-    deudas = []
-    for _, j in jugadores.iterrows():
-        jid = int(j['id'])
-        d = deuda_jugador(jid)
-        if d > 0:
-            # Detalle cuotas pendientes
-            cuotas_pend = q("""SELECT pa.fecha, pa.rival, pg.monto, COALESCE(pg.monto_pagado,0) as pagado
-                               FROM pagos pg JOIN partidos pa ON pg.partido_id=pa.id
-                               WHERE pg.jugador_id=%s AND pg.pagado=0""", (jid,))
-            detalle_c = ", ".join([
-                f"vs {r['rival']} (${r['monto']-r['pagado']:,.2f})"
-                for _, r in cuotas_pend.iterrows()
-            ])
-            # Detalle multas pendientes
-            multas_pend = q("""SELECT m.concepto, m.monto, COALESCE(m.monto_pagado,0) as pagado
-                               FROM multas m WHERE m.jugador_id=%s AND m.pagado=0""", (jid,))
-            detalle_m = ", ".join([
-                f"{r['concepto']} (${r['monto']-r['pagado']:,.2f})"
-                for _, r in multas_pend.iterrows()
-            ])
-            detalle = " | ".join(filter(None, [detalle_c, detalle_m]))
-            deudas.append({"Jugador": j['nombre'], "Total Deuda": f"${d:,.2f}", "Detalle": detalle})
-    if deudas:
-        st.dataframe(pd.DataFrame(deudas), use_container_width=True, hide_index=True)
-    else:
-        st.markdown('<div class="ok-box">✅ Ningún jugador tiene deudas pendientes.</div>', unsafe_allow_html=True)
-
-# ══════════════════════════════════════════════════════════════════════════════
-# TAB 5 — DISCIPLINA
-# ══════════════════════════════════════════════════════════════════════════════
-with TAB_DISCIPLINA:
-    st.markdown('<div class="section-header">🟨 TARJETAS Y SANCIONES</div>', unsafe_allow_html=True)
-    st.markdown("""<div class="alerta-box" style="font-size:13px;">
-    📋 <b>Reglas:</b> 🟨×5 acumuladas = 1 partido &nbsp;|&nbsp;
-    🟨🟨 doble amarilla = 1 partido &nbsp;|&nbsp; 🟥 roja directa = 2 partidos
-    </div>""", unsafe_allow_html=True)
-
-    jugadores = get_jugadores()
-    datos_disc = []
-    for _, j in jugadores.iterrows():
-        jid = int(j['id'])
-        am_t = amarillas_totales(jid)
-        am_c = tarjetas_amarillas_activas(jid)
-        am_d = partidos_doble_amarilla(jid)
-        _, _, _, _, _rojas_bulk2 = get_stats_bulk()
-        ro_t = _rojas_bulk2.get(jid, 0)
-        pend = sanciones_pendientes(jid)
-        sanc = esta_sancionado(jid)
-        estado = sanc if sanc else "✅ Disponible"
-        datos_disc.append({"Jugador": j['nombre'], "🟨 Total": am_t, "🟨 Ciclo": am_c,
-            "🟨🟨 Dobles": am_d, "🟥 Rojas": ro_t, "🚫 Pendientes": pend, "Estado": estado})
-
-    st.dataframe(pd.DataFrame(datos_disc), use_container_width=True, hide_index=True)
-
-    st.markdown('<div class="section-header">🚫 NO PUEDEN JUGAR EL PRÓXIMO PARTIDO</div>', unsafe_allow_html=True)
-    suspendidos = [(r['Jugador'], r['Estado']) for _, r in pd.DataFrame(datos_disc).iterrows() if "Suspendido" in r['Estado']]
-    if suspendidos:
-        for nombre, motivo in suspendidos:
-            st.markdown(f'<div class="peligro-box">🔴 <b>{nombre}</b> — {motivo}</div>', unsafe_allow_html=True)
-    else:
-        st.markdown('<div class="ok-box">✅ Todos los jugadores están disponibles.</div>', unsafe_allow_html=True)
-
-    en_riesgo = [(r['Jugador'], r['🟨 Ciclo']) for _, r in pd.DataFrame(datos_disc).iterrows() if r['🟨 Ciclo'] == 4]
-    if en_riesgo:
-        st.markdown('<div class="section-header">⚠️ EN RIESGO — 4 AMARILLAS</div>', unsafe_allow_html=True)
-        for nombre, _ in en_riesgo:
-            st.markdown(f'<div class="alerta-box">🟨 <b>{nombre}</b> — 4 amarillas en el ciclo. ¡Una más = suspensión!</div>', unsafe_allow_html=True)
-
-    st.markdown('<div class="section-header">📋 HISTORIAL DE SANCIONES</div>', unsafe_allow_html=True)
-    hist_sanc = q("""SELECT j.nombre, s.motivo, s.partidos_suspension, s.partidos_cumplidos,
-               p.fecha, p.rival,
-               CASE WHEN s.partidos_cumplidos>=s.partidos_suspension THEN '✅ Cumplida' ELSE '🚫 Pendiente' END as estado_sancion
-               FROM sanciones s JOIN jugadores j ON s.jugador_id=j.id
-               JOIN partidos p ON s.partido_origen_id=p.id ORDER BY p.fecha DESC""")
-    if len(hist_sanc) > 0:
-        ml = {'roja_directa':'🟥 Roja directa','doble_amarilla':'🟨🟨 Doble amarilla','acumulacion_amarillas':'🟨×5 Acumulación'}
-        hist_sanc['motivo'] = hist_sanc['motivo'].map(ml).fillna(hist_sanc['motivo'])
-        hist_sanc = hist_sanc.rename(columns={'nombre':'Jugador','motivo':'Motivo','partidos_suspension':'Partidos',
-            'partidos_cumplidos':'Cumplidos','fecha':'Fecha','rival':'Rival','estado_sancion':'Estado'})
-        st.dataframe(hist_sanc, use_container_width=True, hide_index=True)
-    else:
-        st.info("Sin sanciones registradas aún.")
-
-# ══════════════════════════════════════════════════════════════════════════════
-# TAB 6 — HISTORIAL Y ESTADÍSTICAS
-# ══════════════════════════════════════════════════════════════════════════════
-with TAB_HISTORIAL:
-    partidos = get_partidos()
-
-    if len(partidos) == 0:
-        st.info("Aún no hay partidos registrados.")
-    else:
-        # ── DEUDAS PENDIENTES (visible para todos) ──────────────────────────
-        st.markdown('<div class="section-header">💸 DEUDAS PENDIENTES DEL PLANTEL</div>', unsafe_allow_html=True)
-        st.caption("Jugadores con cuotas de arbitraje o multas por amonestaciones sin pagar.")
-
-        jugadores_deudas = get_jugadores()
-        deudas_tabla = []
-        for _, j in jugadores_deudas.iterrows():
-            jid = int(j['id'])
-
-            # Cuotas pendientes
-            cuotas = q("""SELECT pa.fecha, pa.rival,
-                                 (pg.monto - COALESCE(pg.monto_pagado,0)) as pendiente,
-                                 'Cuota arbitraje' as tipo
-                          FROM pagos pg JOIN partidos pa ON pg.partido_id=pa.id
-                          WHERE pg.jugador_id=%s AND pg.pagado=0
-                            AND (pg.monto - COALESCE(pg.monto_pagado,0)) > 0.001""", (jid,))
-
-            # Multas pendientes
-            multas_pend = q("""SELECT pa.fecha, pa.rival,
-                                      (m.monto - COALESCE(m.monto_pagado,0)) as pendiente,
-                                      m.concepto as tipo
-                               FROM multas m JOIN partidos pa ON m.partido_id=pa.id
-                               WHERE m.jugador_id=%s AND m.pagado=0
-                                 AND (m.monto - COALESCE(m.monto_pagado,0)) > 0.001""", (jid,))
-
-            total_cuotas = float(cuotas['pendiente'].sum()) if len(cuotas) > 0 else 0.0
-            total_multas = float(multas_pend['pendiente'].sum()) if len(multas_pend) > 0 else 0.0
-            total = total_cuotas + total_multas
-
-            if total > 0.001:
-                detalle_parts = []
-                for _, row in cuotas.iterrows():
-                    detalle_parts.append(f"Arbitraje vs {row['rival']} (${row['pendiente']:,.2f})")
-                for _, row in multas_pend.iterrows():
-                    detalle_parts.append(f"{row['tipo']} vs {row['rival']} (${row['pendiente']:,.2f})")
-                deudas_tabla.append({
-                    "Jugador": j['nombre'],
-                    "Cuotas arbitraje": f"${total_cuotas:,.2f}" if total_cuotas > 0 else "—",
-                    "Multas": f"${total_multas:,.2f}" if total_multas > 0 else "—",
-                    "Total debe": f"${total:,.2f}",
-                    "Detalle": " | ".join(detalle_parts),
-                })
-
-        if deudas_tabla:
-            st.dataframe(pd.DataFrame(deudas_tabla), use_container_width=True, hide_index=True)
-        else:
-            st.markdown('<div class="ok-box">✅ Todos los jugadores están al día con sus pagos.</div>',
-                        unsafe_allow_html=True)
-
-        st.markdown("---")
-
-        # ── EDITAR PARTIDO (solo admin) ─────────────────────────────────────
-        if IS_ADMIN:
-            st.markdown('<div class="section-header">✏️ EDITAR PARTIDO</div>', unsafe_allow_html=True)
-            st.caption("Selecciona un partido para corregir cualquier dato.")
-
-            opciones_edit = [f"{r['fecha']} vs {r['rival']} (#{int(r['id'])})" for _, r in partidos.iterrows()]
-            sel_edit = st.selectbox("Partido a editar", opciones_edit, key="sel_edit")
-            idx_sel = opciones_edit.index(sel_edit)
-            pid_edit = int(partidos.iloc[idx_sel]['id'])
-            pe = partidos[partidos['id']==pid_edit].iloc[0]
-
-            # Limpiar session_state del editor si cambió el partido seleccionado
-            if st.session_state.get('_last_pid_edit') != pid_edit:
-                for k in list(st.session_state.keys()):
-                    if any(k.startswith(p) for p in ['e_fecha_', 'e_rival_', 'e_cancha_',
-                        'e_arb_', 'e_agua_', 'e_gf_', 'e_gc_', 'e_notas_', 'e_arbitral_',
-                        'e_tit_', 'e_cam_', 'goles_edit_', 'tarj_edit_']):
-                        del st.session_state[k]
-                st.session_state['_last_pid_edit'] = pid_edit
-
-            # Detectar si hay partidos duplicados (misma fecha+rival)
-            dupes = partidos[
-                (partidos['fecha']==pe['fecha']) &
-                (partidos['rival'].str.lower()==str(pe['rival']).lower()) &
-                (partidos['id']!=pid_edit)
-            ]
-            if len(dupes) > 0:
-                st.warning(f"⚠️ Hay {len(dupes)} partido(s) duplicado(s) con la misma fecha y rival. "
-                           f"Elimina el que no tenga datos (ID #{int(dupes.iloc[0]['id'])}) antes de editar.")
-
-            with st.expander("✏️ Abrir editor", expanded=False):
-                jugadores_all = get_jugadores()
-                nombres_all = jugadores_all['nombre'].tolist()
-
-                # ── Datos básicos ─────────────────────────────────────────
-                st.markdown("**📋 Datos del partido**")
-                ec1, ec2, ec3 = st.columns(3)
-                with ec1:
-                    e_fecha = st.date_input("Fecha", value=date.fromisoformat(str(pe['fecha'])), key=f"e_fecha_{pid_edit}")
-                    e_rival = st.text_input("Rival", value=str(pe['rival'] or ''), key=f"e_rival_{pid_edit}")
-                with ec2:
-                    e_cancha = st.text_input("Cancha", value=str(pe['cancha'] or ''), key=f"e_cancha_{pid_edit}")
-                    e_arb    = st.number_input("Costo árbitro ($)", min_value=0.0, step=0.5,
-                                                value=float(pe['costo_arbitraje'] or 0), key=f"e_arb_{pid_edit}")
-                    e_agua   = st.number_input("Costo botellón ($)", min_value=0.0, step=0.5,
-                                                value=float(pe['costo_agua'] or 0), key=f"e_agua_{pid_edit}")
-                with ec3:
-                    e_gf = st.number_input("Goles a favor", min_value=0, step=1,
-                                            value=int(pe['goles_favor'] or 0), key=f"e_gf_{pid_edit}")
-                    e_gc = st.number_input("Goles en contra", min_value=0, step=1,
-                                            value=int(pe['goles_contra'] or 0), key=f"e_gc_{pid_edit}")
-
-                e_notas    = st.text_area("Notas", value=str(pe['notas'] or ''), height=60, key=f"e_notas_{pid_edit}")
-                e_arbitral = st.text_area("Comentarios arbitrales", height=70,
-                                          value=str(pe.get('informe_arbitral','') or ''),
-                                          key=f"e_arbitral_{pid_edit}")
-
-                # ── Alineación ────────────────────────────────────────────
-                st.markdown("**⚽ Alineación**")
-                partic_edit = q("""SELECT j.nombre, pa.rol FROM participaciones pa
-                                   JOIN jugadores j ON pa.jugador_id=j.id
-                                   WHERE pa.partido_id=%s ORDER BY pa.rol DESC, j.nombre""", (pid_edit,))
-                tit_act = partic_edit[partic_edit['rol']=='titular']['nombre'].tolist()
-                cam_act = partic_edit[partic_edit['rol']=='cambio']['nombre'].tolist()
-                e_titulares = st.multiselect("Titulares", nombres_all, default=[n for n in tit_act if n in nombres_all], key=f"e_tit_{pid_edit}")
-                e_cambios   = st.multiselect("Cambios", nombres_all, default=[n for n in cam_act if n in nombres_all], key=f"e_cam_{pid_edit}")
-
-                # ── Goles ─────────────────────────────────────────────────
-                st.markdown("**⚽ Goles anotados**")
-                goles_act = q("""SELECT g.id, COALESCE(j.nombre,'Desconocido') as nombre,
-                                        g.minuto, g.tipo, g.jugador_id
-                                 FROM goles g LEFT JOIN jugadores j ON g.jugador_id=j.id
-                                 WHERE g.partido_id=%s ORDER BY g.minuto""", (pid_edit,))
-                nombres_con_desc = nombres_all + ["Desconocido / propia puerta"]
-
-                # Mostrar goles existentes con opción de eliminar
-                key_goles_edit = f"goles_edit_{pid_edit}"
-                if key_goles_edit not in st.session_state:
-                    st.session_state[key_goles_edit] = [
-                        {"nombre": row['nombre'], "minuto": int(row['minuto'] or 1),
-                         "tipo": str(row['tipo'])}
-                        for _, row in goles_act.iterrows()
-                    ]
-
-                goles_edit_list = st.session_state[key_goles_edit]
-                to_del_g = []
-                for gi, g in enumerate(goles_edit_list):
-                    gc1, gc2, gc3, gc4 = st.columns([3, 1, 1, 0.5])
-                    with gc1:
-                        idx_j = nombres_con_desc.index(g['nombre']) if g['nombre'] in nombres_con_desc else 0
-                        goles_edit_list[gi]['nombre'] = st.selectbox("Jugador", nombres_con_desc,
-                            index=idx_j, key=f"eg_jug_{pid_edit}_{gi}")
-                    with gc2:
-                        goles_edit_list[gi]['minuto'] = st.number_input("Min.", min_value=1, max_value=120,
-                            value=g['minuto'], key=f"eg_min_{pid_edit}_{gi}")
-                    with gc3:
-                        tipos = ['normal', 'desconocido']
-                        idx_t = tipos.index(g['tipo']) if g['tipo'] in tipos else 0
-                        goles_edit_list[gi]['tipo'] = st.selectbox("Tipo", tipos,
-                            index=idx_t, key=f"eg_tip_{pid_edit}_{gi}")
-                    with gc4:
-                        st.markdown("<br>", unsafe_allow_html=True)
-                        if st.button("❌", key=f"eg_del_{pid_edit}_{gi}"):
-                            to_del_g.append(gi)
-                for gi in reversed(to_del_g):
-                    goles_edit_list.pop(gi)
-                if to_del_g: st.cache_data.clear(); st.rerun()
-
-                if st.button("➕ Agregar gol", key=f"eg_add_{pid_edit}"):
-                    goles_edit_list.append({"nombre": nombres_all[0] if nombres_all else "Desconocido", "minuto": 1, "tipo": "normal"})
-                    st.cache_data.clear(); st.rerun()
-
-                # ── Tarjetas ──────────────────────────────────────────────
-                st.markdown("**🟨 Tarjetas**")
-                tarj_act = q("""SELECT t.id, j.nombre, t.tipo
-                                FROM tarjetas t JOIN jugadores j ON t.jugador_id=j.id
-                                WHERE t.partido_id=%s ORDER BY t.tipo, j.nombre""", (pid_edit,))
-
-                key_tarj_edit = f"tarj_edit_{pid_edit}"
-                if key_tarj_edit not in st.session_state:
-                    st.session_state[key_tarj_edit] = [
-                        {"nombre": row['nombre'], "tipo": str(row['tipo'])}
-                        for _, row in tarj_act.iterrows()
-                    ]
-
-                tarj_edit_list = st.session_state[key_tarj_edit]
-                to_del_t = []
-                for ti, t in enumerate(tarj_edit_list):
-                    tc1, tc2, tc3 = st.columns([3, 2, 0.5])
-                    with tc1:
-                        idx_j = nombres_all.index(t['nombre']) if t['nombre'] in nombres_all else 0
-                        tarj_edit_list[ti]['nombre'] = st.selectbox("Jugador", nombres_all,
-                            index=idx_j, key=f"et_jug_{pid_edit}_{ti}")
-                    with tc2:
-                        tipos_t = ['amarilla', 'roja']
-                        idx_t = tipos_t.index(t['tipo']) if t['tipo'] in tipos_t else 0
-                        tarj_edit_list[ti]['tipo'] = st.selectbox("Tarjeta", tipos_t,
-                            index=idx_t, key=f"et_tip_{pid_edit}_{ti}")
-                    with tc3:
-                        st.markdown("<br>", unsafe_allow_html=True)
-                        if st.button("❌", key=f"et_del_{pid_edit}_{ti}"):
-                            to_del_t.append(ti)
-                for ti in reversed(to_del_t):
-                    tarj_edit_list.pop(ti)
-                if to_del_t: st.cache_data.clear(); st.rerun()
-
-                if st.button("➕ Agregar tarjeta", key=f"et_add_{pid_edit}"):
-                    tarj_edit_list.append({"nombre": nombres_all[0] if nombres_all else "", "tipo": "amarilla"})
-                    st.cache_data.clear(); st.rerun()
-
-                # ── Cobros ────────────────────────────────────────────────
-                st.markdown("**💰 Cobros — cuotas de arbitraje**")
-                pagos_edit = q("""SELECT pg.id, j.nombre, pg.monto,
-                                         COALESCE(pg.monto_pagado,0) as monto_pagado, pg.pagado
-                                  FROM pagos pg JOIN jugadores j ON pg.jugador_id=j.id
-                                  WHERE pg.partido_id=%s ORDER BY j.nombre""", (pid_edit,))
-
-                if len(pagos_edit) > 0:
-                    for _, pg in pagos_edit.iterrows():
-                        pc1, pc2, pc3 = st.columns([3, 2, 2])
-                        with pc1:
-                            st.markdown(f"**{pg['nombre']}**", unsafe_allow_html=True)
-                        with pc2:
-                            nuevo_monto = st.number_input("Cuota ($)", min_value=0.0, step=0.5,
-                                value=float(pg['monto']), key=f"ep_monto_{pid_edit}_{pg['id']}")
-                        with pc3:
-                            nuevo_pagado = st.number_input("Pagado ($)", min_value=0.0,
-                                max_value=float(nuevo_monto) if nuevo_monto > 0 else 9999.0,
-                                step=0.5, value=float(pg['monto_pagado']),
-                                key=f"ep_pago_{pid_edit}_{pg['id']}")
-                else:
-                    st.caption("No hay cuotas registradas para este partido.")
-
-                # ── Multas ────────────────────────────────────────────────
-                st.markdown("**⚠️ Multas por tarjetas**")
-                multas_edit = q("""SELECT m.id, j.nombre, m.concepto, m.monto,
-                                          COALESCE(m.monto_pagado,0) as monto_pagado
-                                   FROM multas m JOIN jugadores j ON m.jugador_id=j.id
-                                   WHERE m.partido_id=%s ORDER BY j.nombre""", (pid_edit,))
-
-                if len(multas_edit) > 0:
-                    for _, m in multas_edit.iterrows():
-                        mc1, mc2, mc3 = st.columns([3, 2, 2])
-                        with mc1:
-                            st.markdown(f"**{m['nombre']}** — {m['concepto']}")
-                        with mc2:
-                            nuevo_monto_m = st.number_input("Multa ($)", min_value=0.0, step=0.5,
-                                value=float(m['monto']), key=f"em_monto_{pid_edit}_{m['id']}")
-                        with mc3:
-                            nuevo_pago_m = st.number_input("Pagado ($)", min_value=0.0,
-                                max_value=float(nuevo_monto_m) if nuevo_monto_m > 0 else 9999.0,
-                                step=0.5, value=float(m['monto_pagado']),
-                                key=f"em_pago_{pid_edit}_{m['id']}")
-                else:
-                    st.caption("No hay multas registradas para este partido.")
-
-                # ── Botones guardar / eliminar ─────────────────────────────
-                st.markdown("---")
-                e_col1, e_col2 = st.columns(2)
-                with e_col1:
-                    if st.button("💾 Guardar todos los cambios", type="primary", key=f"btn_edit_{pid_edit}"):
-                        fecha_str_edit = str(e_fecha)
-                        pid_edit_int = int(pid_edit)
-                        dup = q("""SELECT id FROM partidos
-                                   WHERE fecha=%s AND LOWER(TRIM(rival))=LOWER(TRIM(%s)) AND id!=%s""",
-                                (fecha_str_edit, e_rival.strip(), pid_edit_int))
-                        if len(dup) > 0:
-                            st.error(f"⚠️ Ya existe otro partido el {fecha_str_edit} contra '{e_rival.strip()}'.")
-                        else:
-                            conn = None
-                            try:
-                                conn = get_conn()
-                                cur = conn.cursor()
-                                # Datos básicos
-                                cur.execute("""UPDATE partidos SET fecha=%s,rival=%s,cancha=%s,goles_favor=%s,
-                                               goles_contra=%s,costo_arbitraje=%s,costo_agua=%s,notas=%s,informe_arbitral=%s
-                                               WHERE id=%s""",
-                                             (fecha_str_edit, e_rival.strip(), e_cancha,
-                                              e_gf, e_gc, e_arb, e_agua, e_notas, e_arbitral, pid_edit_int))
-                                # Participaciones
-                                cur.execute("DELETE FROM participaciones WHERE partido_id=%s", (pid_edit_int,))
-                                for nombre in e_titulares:
-                                    rows = jugadores_all[jugadores_all['nombre']==nombre]
-                                    if len(rows)>0:
-                                        cur.execute("INSERT INTO participaciones (partido_id,jugador_id,rol) VALUES (%s,%s,%s)",
-                                                     (pid_edit_int, int(rows.iloc[0]['id']), 'titular'))
-                                for nombre in e_cambios:
-                                    rows = jugadores_all[jugadores_all['nombre']==nombre]
-                                    if len(rows)>0:
-                                        cur.execute("INSERT INTO participaciones (partido_id,jugador_id,rol) VALUES (%s,%s,%s)",
-                                                     (pid_edit_int, int(rows.iloc[0]['id']), 'cambio'))
-                                # Goles
-                                cur.execute("DELETE FROM goles WHERE partido_id=%s", (pid_edit_int,))
-                                for g in st.session_state.get(key_goles_edit, []):
-                                    if g['nombre'] == "Desconocido / propia puerta":
-                                        cur.execute("INSERT INTO goles (partido_id,jugador_id,minuto,tipo) VALUES (%s,NULL,%s,%s)",
-                                                     (pid_edit_int, g['minuto'], 'desconocido'))
-                                    else:
-                                        rows = jugadores_all[jugadores_all['nombre']==g['nombre']]
-                                        if len(rows)>0:
-                                            cur.execute("INSERT INTO goles (partido_id,jugador_id,minuto,tipo) VALUES (%s,%s,%s,%s)",
-                                                         (pid_edit_int, int(rows.iloc[0]['id']), g['minuto'], g['tipo']))
-                                # Tarjetas
-                                cur.execute("DELETE FROM tarjetas WHERE partido_id=%s", (pid_edit_int,))
-                                for t in st.session_state.get(key_tarj_edit, []):
-                                    rows = jugadores_all[jugadores_all['nombre']==t['nombre']]
-                                    if len(rows)>0:
-                                        cur.execute("INSERT INTO tarjetas (partido_id,jugador_id,tipo,cumplida) VALUES (%s,%s,%s,0)",
-                                                     (pid_edit_int, int(rows.iloc[0]['id']), t['tipo']))
-                                # Caja gastos
-                                cur.execute("DELETE FROM caja WHERE partido_id=%s AND concepto LIKE 'Gastos partido%%'",
-                                             (pid_edit_int,))
-                                if e_arb + e_agua > 0:
-                                    cur.execute("INSERT INTO caja (partido_id,concepto,monto,fecha) VALUES (%s,%s,%s,%s)",
-                                                 (pid_edit_int, f"Gastos partido vs {e_rival.strip()}",
-                                                  -(e_arb+e_agua), str(e_fecha)))
-                                # Actualizar cobros (pagos)
-                                if len(pagos_edit) > 0:
-                                    for _, pg in pagos_edit.iterrows():
-                                        nm = st.session_state.get(f"ep_monto_{pid_edit_int}_{pg['id']}", float(pg['monto']))
-                                        np = st.session_state.get(f"ep_pago_{pid_edit_int}_{pg['id']}", float(pg['monto_pagado']))
-                                        saldado = np >= nm - 0.001
-                                        cur.execute("UPDATE pagos SET monto=%s, monto_pagado=%s, pagado=%s WHERE id=%s",
-                                                     (nm, np, int(saldado), int(pg['id'])))
-                                # Actualizar multas
-                                if len(multas_edit) > 0:
-                                    for _, m in multas_edit.iterrows():
-                                        nm = st.session_state.get(f"em_monto_{pid_edit_int}_{m['id']}", float(m['monto']))
-                                        np = st.session_state.get(f"em_pago_{pid_edit_int}_{m['id']}", float(m['monto_pagado']))
-                                        saldado = np >= nm - 0.001
-                                        cur.execute("UPDATE multas SET monto=%s, monto_pagado=%s, pagado=%s WHERE id=%s",
-                                                     (nm, np, int(saldado), int(m['id'])))
-                                conn.commit()
-                                release_conn(conn)
-                                for k in [key_goles_edit, key_tarj_edit]:
-                                    st.session_state.pop(k, None)
-                                guardar_db_en_github()
-                                st.success("✅ Partido actualizado completamente.")
-                                st.cache_data.clear(); st.rerun()
-                            except Exception as ex:
-                                if conn:
-                                    try: conn.rollback(); release_conn(conn)
-                                    except: pass
-                                st.error(f"❌ Error: {ex}")
-                with e_col2:
-                    key_confirm_del = f"confirm_del_{pid_edit}"
-                    if st.session_state.get(key_confirm_del):
-                        st.warning(f"⚠️ ¿Confirmas eliminar el partido vs **{pe['rival']}** del {pe['fecha']}? Se borrarán goles, tarjetas, cobros y sanciones.")
-                        cd1, cd2 = st.columns(2)
-                        with cd1:
-                            if st.button("✅ Sí, eliminar", type="primary", key=f"del_confirm_yes_{pid_edit}"):
-                                eliminar_partido_completo(pid_edit)
-                                st.session_state.pop(key_confirm_del, None)
-                                st.success("✅ Partido eliminado. Deudas pendientes restablecidas."); st.cache_data.clear(); st.rerun()
-                        with cd2:
-                            if st.button("❌ Cancelar", key=f"del_confirm_no_{pid_edit}"):
-                                st.session_state.pop(key_confirm_del, None)
-                                st.cache_data.clear(); st.rerun()
-                    else:
-                        if st.button("🗑️ Eliminar este partido", key=f"del_edit_{pid_edit}"):
-                            st.session_state[key_confirm_del] = True
-                            st.cache_data.clear(); st.rerun()
-
-            st.markdown("---")
-        st.markdown('<div class="section-header">📈 ESTADÍSTICAS GENERALES</div>', unsafe_allow_html=True)
-
-        total_p  = len(partidos)
-        ganados  = len(partidos[partidos['goles_favor'] > partidos['goles_contra']])
-        empates  = len(partidos[partidos['goles_favor'] == partidos['goles_contra']])
-        perdidos = len(partidos[partidos['goles_favor'] < partidos['goles_contra']])
-        puntos   = ganados * 3 + empates
-        gf_total = int(partidos['goles_favor'].sum())
-        gc_total = int(partidos['goles_contra'].sum())
-        dif_goles = gf_total - gc_total
-
-        kg1, kg2, kg3, kg4, kg5, kg6, kg7 = st.columns(7)
-        def mk(col, label, val, color="#f0c040"):
-            col.markdown(f"""<div class="metric-card" style="text-align:center;">
-                <div class="label">{label}</div>
-                <div class="valor" style="color:{color};font-size:30px;">{val}</div>
-            </div>""", unsafe_allow_html=True)
-        mk(kg1, "🏆 Puntos",   puntos,   "#f0c040")
-        mk(kg2, "✅ Ganados",  ganados,  "#50e080")
-        mk(kg3, "🤝 Empates",  empates,  "#f0c040")
-        mk(kg4, "❌ Perdidos", perdidos, "#ff6b6b")
-        mk(kg5, "⚽ GF",       gf_total, "#f0c040")
-        mk(kg6, "🥅 GC",       gc_total, "#ff6b6b")
-        mk(kg7, "📊 DIF",      f"+{dif_goles}" if dif_goles >= 0 else str(dif_goles),
-           "#50e080" if dif_goles >= 0 else "#ff6b6b")
-
-        # ── Tabla acumulada partido a partido ───────────────────────────────
-        st.markdown('<div class="section-header">📊 TABLA ACUMULADA PARTIDO A PARTIDO</div>', unsafe_allow_html=True)
-        st.caption("Los partidos están ordenados del más antiguo al más reciente para ver la progresión.")
-
-        partidos_asc = partidos.sort_values('fecha', ascending=True).reset_index(drop=True)
-        tabla_acum = []
-        pts_acum = gf_acum = gc_acum = g_acum = e_acum = p_acum = 0
-        for _, p in partidos_asc.iterrows():
-            gf = int(p['goles_favor']) if p['goles_favor'] else 0
-            gc = int(p['goles_contra']) if p['goles_contra'] else 0
-            if gf > gc:   res = "✅ G"; pts = 3; g_acum += 1
-            elif gf == gc: res = "🤝 E"; pts = 1; e_acum += 1
-            else:          res = "❌ P"; pts = 0; p_acum += 1
-            pts_acum += pts
-            gf_acum  += gf
-            gc_acum  += gc
-            dif = gf_acum - gc_acum
-            tabla_acum.append({
-                "Fecha": p['fecha'],
-                "Rival": p['rival'] or "—",
-                "Marcador": f"{gf} - {gc}",
-                "Res.": res,
-                "Pts partido": pts,
-                "🏆 Pts acum.": pts_acum,
-                "✅ G": g_acum,
-                "🤝 E": e_acum,
-                "❌ P": p_acum,
-                "⚽ GF acum.": gf_acum,
-                "🥅 GC acum.": gc_acum,
-                "📊 Dif.": f"+{dif}" if dif >= 0 else str(dif),
-            })
-        st.dataframe(pd.DataFrame(tabla_acum), use_container_width=True, hide_index=True)
-
-        # ── Tabla de goleadores ─────────────────────────────────────────────
-        st.markdown('<div class="section-header">🥇 TABLA DE GOLEADORES</div>', unsafe_allow_html=True)
-        goleadores_df = q("""
-            SELECT j.nombre, j.posicion,
-                   COUNT(g.id) as goles,
-                   COUNT(CASE WHEN g.tipo='normal' THEN 1 END) as goles_normales
-            FROM jugadores j
-            LEFT JOIN goles g ON j.id=g.jugador_id
-            WHERE j.activo=1
-            GROUP BY j.id, j.nombre, j.posicion
-            HAVING COUNT(g.id) > 0
-            ORDER BY COUNT(g.id) DESC
-        """)
-        if len(goleadores_df) > 0:
-            for rank, (_, row) in enumerate(goleadores_df.iterrows(), 1):
-                medal = "🥇" if rank==1 else ("🥈" if rank==2 else ("🥉" if rank==3 else f"#{rank}"))
-                st.markdown(f"""<div class="jugador-card">
-                    <div class="jugador-num" style="background:#3d2000;color:#b87800;font-size:18px;">{medal}</div>
-                    <div style="flex:1;">
-                        <div style="font-weight:800;font-size:16px;">{row['nombre']}</div>
-                        <div style="color:#7a3030;font-size:12px;">{row['posicion'] or '—'}</div>
-                    </div>
-                    <div style="font-family:'Bebas Neue',sans-serif;font-size:36px;color:#b87800;">{int(row['goles'])} ⚽</div>
-                </div>""", unsafe_allow_html=True)
-        else:
-            st.info("Aún no hay goles registrados.")
-
-        # ── Participaciones por jugador ─────────────────────────────────────
-        st.markdown('<div class="section-header">👟 PARTICIPACIONES POR JUGADOR</div>', unsafe_allow_html=True)
-        stats = q("""
-            SELECT j.nombre, j.posicion,
-                   (SELECT COUNT(*) FROM participaciones pa WHERE pa.jugador_id=j.id AND pa.rol='titular') as titulares,
-                   (SELECT COUNT(*) FROM participaciones pa WHERE pa.jugador_id=j.id AND pa.rol='cambio') as cambios,
-                   (SELECT COUNT(*) FROM goles g WHERE g.jugador_id=j.id AND g.tipo='normal') as goles,
-                   (SELECT COUNT(*) FROM tarjetas t WHERE t.jugador_id=j.id AND t.tipo='amarilla') as amarillas,
-                   (SELECT COUNT(*) FROM tarjetas t WHERE t.jugador_id=j.id AND t.tipo='roja') as rojas
-            FROM jugadores j
-            WHERE j.activo=1
-            ORDER BY (
-                (SELECT COUNT(*) FROM participaciones pa WHERE pa.jugador_id=j.id)
-            ) DESC
-        """)
-        if len(stats) > 0:
-            st.dataframe(stats.rename(columns={
-                'nombre':'Jugador','posicion':'Posición',
-                'titulares':'⚽ Titular','cambios':'🔄 Cambio',
-                'goles':'⚽ Goles','amarillas':'🟨','rojas':'🟥'
-            }), use_container_width=True, hide_index=True)
-
-        # ── Historial detallado ─────────────────────────────────────────────
-        st.markdown('<div class="section-header">📅 HISTORIAL DETALLADO DE PARTIDOS</div>', unsafe_allow_html=True)
-        for _, p in partidos.iterrows():
-            pid = int(p['id'])
-            gf = int(p['goles_favor']) if p['goles_favor'] else 0
-            gc = int(p['goles_contra']) if p['goles_contra'] else 0
-            resultado = "✅ Ganado" if gf > gc else ("🤝 Empate" if gf == gc else "❌ Perdido")
-
-            partic = q("""SELECT j.nombre, pa.rol FROM participaciones pa
-                JOIN jugadores j ON pa.jugador_id=j.id WHERE pa.partido_id=%s""", (pid,))
-            tit_str = ", ".join(partic[partic['rol']=='titular']['nombre'].tolist()) or "N/D"
-            cam_str = ", ".join(partic[partic['rol']=='cambio']['nombre'].tolist()) or "Ninguno"
-
-            tarj = q("""SELECT j.nombre, t.tipo FROM tarjetas t
-                JOIN jugadores j ON t.jugador_id=j.id WHERE t.partido_id=%s""", (pid,))
-            am_str = ", ".join(tarj[tarj['tipo']=='amarilla']['nombre'].tolist()) or "—"
-            ro_str = ", ".join(tarj[tarj['tipo']=='roja']['nombre'].tolist()) or "—"
-
-            goles_p = q("""SELECT COALESCE(j.nombre,'Desconocido') as nombre, g.minuto, g.tipo
-                FROM goles g LEFT JOIN jugadores j ON g.jugador_id=j.id
-                WHERE g.partido_id=%s ORDER BY g.minuto""", (pid,))
-
-            pagos_p = q("SELECT COUNT(*) as total, SUM(pagado) as pagaron FROM pagos WHERE partido_id=%s", (pid,))
-            total_j = int(pagos_p['total'][0]) if pagos_p['total'][0] else 0
-            pagaron = int(pagos_p['pagaron'][0]) if pagos_p['pagaron'][0] else 0
-
-            with st.expander(f"📅 {p['fecha']} — vs {p['rival'] or 'Rival'} — {gf}:{gc} {resultado}"):
-                ec1, ec2 = st.columns(2)
-                with ec1:
-                    st.markdown(f"**Cancha:** {p['cancha'] or 'N/D'}")
-                    st.markdown(f"**Resultado:** {gf} — {gc} ({resultado})")
-                    st.markdown(f"**Árbitro:** ${p['costo_arbitraje'] or 0:,.0f} | **Agua:** ${p['costo_agua'] or 0:,.0f}")
-                    st.markdown(f"**Pagos:** {pagaron}/{total_j} jugadores pagaron")
-                with ec2:
-                    st.markdown(f"**🟨 Amarillas:** {am_str}")
-                    st.markdown(f"**🟥 Rojas:** {ro_str}")
-                    if p['notas']:
-                        st.markdown(f"**📝 Notas:** {p['notas']}")
-                st.markdown(f"**⚽ Titulares:** {tit_str}")
-                st.markdown(f"**🔄 Cambios:** {cam_str}")
-
-                # Mostrar cambios detallados
-                cambios_det = q("""SELECT js.nombre as sale, je.nombre as entra, c.minuto
-                                   FROM cambios c
-                                   JOIN jugadores js ON c.jugador_sale_id=js.id
-                                   JOIN jugadores je ON c.jugador_entra_id=je.id
-                                   WHERE c.partido_id=%s ORDER BY c.minuto""", (pid,))
-                if len(cambios_det) > 0:
-                    st.markdown("**↔️ Detalles de cambios:**")
-                    for _, ch in cambios_det.iterrows():
-                        min_str = f"min. {int(ch['minuto'])}" if ch['minuto'] else ""
-                        st.markdown(f"&nbsp;&nbsp;↗️ Sale **{ch['sale']}** → Entra **{ch['entra']}** {min_str}")
-
-                if len(goles_p) > 0:
-                    st.markdown("**⚽ Goles:**")
-                    for _, g in goles_p.iterrows():
-                        min_str = f"min. {int(g['minuto'])}" if g['minuto'] else ""
-                        st.markdown(f"&nbsp;&nbsp;⚽ **{g['nombre']}** {min_str}")
-
-                if IS_ADMIN:
-                    key_del_hist = f"confirm_del_hist_{pid}"
-                    if st.session_state.get(key_del_hist):
-                        st.warning(f"⚠️ ¿Eliminar partido **vs {p['rival']}** del **{p['fecha']}**? Se borran goles, tarjetas, cobros y sanciones.")
-                        dh1, dh2 = st.columns(2)
-                        with dh1:
-                            if st.button("✅ Sí, eliminar", type="primary", key=f"del_hist_yes_{pid}"):
-                                eliminar_partido_completo(pid)
-                                st.session_state.pop(key_del_hist, None)
-                                st.success("✅ Partido eliminado. Deudas pendientes restablecidas."); st.cache_data.clear(); st.rerun()
-                        with dh2:
-                            if st.button("❌ Cancelar", key=f"del_hist_no_{pid}"):
-                                st.session_state.pop(key_del_hist, None)
-                                st.cache_data.clear(); st.rerun()
-                    else:
-                        if st.button("🗑️ Eliminar partido", key=f"del_{pid}"):
-                            st.session_state[key_del_hist] = True
-                            st.cache_data.clear(); st.rerun()
-
-                    # Botón de descarga PDF — solo admin
-                    pdf_bytes = generar_pdf_partido(pid)
-                    if pdf_bytes:
-                        nombre_pdf = f"informe_{p['fecha']}_vs_{(p['rival'] or 'rival').replace(' ','_')}.pdf"
-                        st.download_button(
-                            label="📄 Descargar informe PDF",
-                            data=pdf_bytes,
-                            file_name=nombre_pdf,
-                            mime="application/pdf",
-                            key=f"pdf_{pid}"
-                        )
-
-# ══════════════════════════════════════════════════════════════════════════════
-# TAB — CALENDARIO
-# ══════════════════════════════════════════════════════════════════════════════
-with TAB_CALENDARIO:
-    st.markdown('<div class="section-header">📅 CALENDARIO DE PARTIDOS</div>', unsafe_allow_html=True)
-
-    # Próximos partidos
-    proximos = q("""SELECT * FROM calendario
-                    WHERE fecha >= CURRENT_DATE::text
-                    ORDER BY fecha ASC, hora ASC""")
-
-    if len(proximos) == 0:
-        st.markdown('<div class="ok-box">📅 No hay partidos programados próximamente.</div>',
-                    unsafe_allow_html=True)
-    else:
-        st.markdown(f"<p style='color:#7a3030;font-size:13px;'>{len(proximos)} partido(s) próximo(s) programado(s)</p>",
-                    unsafe_allow_html=True)
-        for _, ev in proximos.iterrows():
-            hora_str    = str(ev['hora']) if ev['hora'] and str(ev['hora']).strip() not in ('', 'Por confirmar') else "Por confirmar"
-            estadio_str = str(ev['estadio']) if ev['estadio'] else "Estadio por confirmar"
-            notas_str   = str(ev['notas']) if ev['notas'] else ""
-            tipo_str    = str(ev['tipo']) if ev['tipo'] else "Liga"
-            from datetime import datetime as _dt
-            DIAS_ES   = ["Lunes","Martes","Miércoles","Jueves","Viernes","Sábado","Domingo"]
-            MESES_ES  = ["enero","febrero","marzo","abril","mayo","junio",
-                         "julio","agosto","septiembre","octubre","noviembre","diciembre"]
+    [data-testid="stSidebar"] [data-testid="stFileUploaderDropzoneInstructions"] * {
+        color: #90A4AE !important;
+        font-size: 0.75em !important;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+    if st.button("⬇️  Exportar a Excel", use_container_width=True):
+        try:
+            xls_bytes = engine_to_excel_bytes(ov)
+            nombre = f"ovomas_backup_{date.today().strftime('%Y%m%d')}.xlsx"
+            st.download_button(
+                "📥 Descargar backup", data=xls_bytes,
+                file_name=nombre,
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                use_container_width=True,
+            )
+        except Exception as e:
+            st.error(f"Error: {e}")
+
+    if can_delete():
+        uploaded = st.file_uploader("Cargar backup .xlsx", type=["xlsx"], label_visibility="collapsed")
+        if uploaded:
             try:
-                fecha_obj = _dt.strptime(str(ev['fecha']), "%Y-%m-%d")
-                dia_semana = DIAS_ES[fecha_obj.weekday()]
-                mes        = MESES_ES[fecha_obj.month - 1]
-                fecha_fmt  = f"{dia_semana} {fecha_obj.day} de {mes} de {fecha_obj.year}"
-            except Exception:
-                fecha_fmt = str(ev['fecha'])
+                ov, tablas_ok = load_engine_from_excel(uploaded.read())
+                guardar_estado(ov)
+                st.success(f"✓ {tablas_ok} tablas restauradas")
+                st.rerun()
+            except Exception as e:
+                st.error(f"Error: {e}")
 
-            badge_color = "#9b2335" if tipo_str=="Liga" else ("#1a5c8a" if tipo_str=="Copa" else "#4a7a30")
-            st.markdown(f"""
-            <div style="background:#ffffff;border:1px solid #d4a0a0;border-left:6px solid {badge_color};
-                        border-radius:10px;padding:16px 20px;margin-bottom:12px;">
-                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
-                    <span style="font-family:'Bebas Neue',sans-serif;font-size:22px;color:{badge_color};letter-spacing:1px;">
-                        vs {ev['rival']}
-                    </span>
-                    <span style="background:{badge_color};color:#ffffff;font-size:11px;font-weight:700;
-                                 padding:3px 10px;border-radius:20px;">{tipo_str}</span>
-                </div>
-                <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;font-size:13px;color:#555555;">
-                    <div>📅 <b style="color:#1a0808;">{fecha_fmt}</b></div>
-                    <div>🕐 <b style="color:#1a0808;">{hora_str}</b></div>
-                    <div>🏟️ <b style="color:#1a0808;">{estadio_str}</b></div>
-                </div>
-                {'<div style="margin-top:8px;font-size:12px;color:#7a3030;">📝 ' + notas_str + '</div>' if notas_str else ''}
-            </div>
-            """, unsafe_allow_html=True)
+    st.markdown("---")
 
-    # Historial de partidos pasados del calendario
-    pasados = q("""SELECT * FROM calendario
-                   WHERE fecha < CURRENT_DATE::text
-                   ORDER BY fecha DESC LIMIT 10""")
-    if len(pasados) > 0:
-        with st.expander(f"📋 Partidos anteriores del calendario ({len(pasados)})"):
-            for _, ev in pasados.iterrows():
-                st.markdown(f"- {ev['fecha']} — vs **{ev['rival']}** | {ev['estadio'] or 'Sin estadio'} | {ev['hora'] or ''}")
+    # ── Sistema ───────────────────────────────────────────────────
+    st.markdown("### ⚙️ Sistema")
+    if st.button("🔄  Reiniciar sistema", use_container_width=True, disabled=not can_delete()):
+        reset_engine()
+        st.rerun()
 
-    # Admin: agregar y gestionar partidos
-    if IS_ADMIN:
-        st.markdown("---")
-        st.markdown('<div class="section-header">➕ PROGRAMAR PARTIDO</div>', unsafe_allow_html=True)
 
-        with st.form("form_calendario"):
-            cc1, cc2, cc3 = st.columns(3)
-            with cc1:
-                cal_fecha = st.date_input("📅 Fecha", value=date.today(), key="cal_fecha")
-                cal_rival = st.text_input("⚔️ Rival", placeholder="Ej: Deportivo Norte", key="cal_rival")
-            with cc2:
-                # Selector de hora con opciones comunes de fútbol
-                horas_opciones = [
-                    "Por confirmar",
-                    "07:00 AM", "07:30 AM", "08:00 AM", "08:30 AM",
-                    "09:00 AM", "09:30 AM", "10:00 AM", "10:30 AM",
-                    "11:00 AM", "11:30 AM", "12:00 PM", "12:30 PM",
-                    "01:00 PM", "01:30 PM", "02:00 PM", "02:30 PM",
-                    "03:00 PM", "03:30 PM", "04:00 PM", "04:30 PM",
-                    "05:00 PM", "05:30 PM", "06:00 PM", "06:30 PM",
-                    "07:00 PM", "07:30 PM", "08:00 PM",
-                ]
-                cal_hora    = st.selectbox("🕐 Hora del partido", horas_opciones, key="cal_hora")
-                cal_estadio = st.text_input("🏟️ Estadio / Cancha", placeholder="Ej: Cancha Barrio Centro", key="cal_estadio")
-            with cc3:
-                cal_tipo  = st.selectbox("🏆 Tipo", ["Liga", "Copa", "Amistoso", "Otro"], key="cal_tipo")
-                cal_notas = st.text_input("📝 Notas", placeholder="Ej: Llevar uniforme completo", key="cal_notas")
+header("PANEL GENERAL", date.today().strftime("📅 %d de %B de %Y"))
 
-            if st.form_submit_button("📅 Agregar al calendario", type="primary"):
-                if cal_rival.strip():
-                    run("""INSERT INTO calendario (fecha,hora,rival,estadio,tipo,notas)
-                           VALUES (%s,%s,%s,%s,%s,%s)""",
-                        (str(cal_fecha), cal_hora.strip(), cal_rival.strip(),
-                         cal_estadio.strip(), cal_tipo, cal_notas.strip()))
-                    guardar_db_en_github()
-                    st.success(f"✅ Partido vs {cal_rival.strip()} agregado al calendario.")
-                    st.cache_data.clear(); st.rerun()
-                else:
-                    st.error("⚠️ El nombre del rival es obligatorio.")
+hoy = date.today().strftime("%Y-%m-%d")
 
-        # Eliminar partido del calendario
-        if len(proximos) > 0:
-            st.markdown("**🗑️ Eliminar partido del calendario**")
-            opciones_cal = [f"{r['fecha']} vs {r['rival']} ({r['hora'] or 'sin hora'})" for _, r in proximos.iterrows()]
-            sel_cal = st.selectbox("Selecciona el partido a eliminar", opciones_cal, key="sel_cal_del")
-            idx_cal = opciones_cal.index(sel_cal)
-            pid_cal = int(proximos.iloc[idx_cal]['id'])
-            key_del_cal = f"del_cal_{pid_cal}"
-            if st.session_state.get(key_del_cal):
-                st.warning(f"¿Eliminar **{sel_cal}** del calendario?")
-                dc1, dc2 = st.columns(2)
-                with dc1:
-                    if st.button("✅ Sí, eliminar", type="primary", key=f"del_cal_yes_{pid_cal}"):
-                        run("DELETE FROM calendario WHERE id=%s", (pid_cal,))
-                        guardar_db_en_github()
-                        st.session_state.pop(key_del_cal, None)
-                        st.success("✅ Eliminado del calendario."); st.cache_data.clear(); st.rerun()
-                with dc2:
-                    if st.button("❌ Cancelar", key=f"del_cal_no_{pid_cal}"):
-                        st.session_state.pop(key_del_cal, None); st.cache_data.clear(); st.rerun()
-            else:
-                if st.button("🗑️ Eliminar partido seleccionado", key=f"del_cal_btn_{pid_cal}"):
-                    st.session_state[key_del_cal] = True; st.cache_data.clear(); st.rerun()
+# ── KPIs globales ─────────────────────────────────────────────────
+total_aves    = 0
+total_hue_hoy = 0
+gal_activos   = 0
+total_cubetas = 0
+
+galpones_prod = [g for g in ov.GALPONES if not ov.GALPONES[g].get("temporal")]
+
+resumen_galp = []
+for g in galpones_prod:
+    lts = ov.lotes_aves[
+        (ov.lotes_aves["galpon_actual"] == g) & (ov.lotes_aves["estado"] == "ACTIVO")
+    ]
+    if len(lts) == 0:
+        resumen_galp.append({
+            "galpon": g, "planta": ov.GALPONES[g]["planta"],
+            "aves": 0, "edad_s": 0, "fase": "—",
+            "pct_pos": 0, "huevos": 0, "estado": "vacío",
+        })
+        continue
+
+    lote   = lts.iloc[0]
+    edad_s = ov._edad_dias(lote["fecha_nacimiento"]) // 7
+    params = ov._params_edad(edad_s)
+    fase   = params["fase"] if params else "—"
+
+    reg_df = ov.registro_diario[ov.registro_diario["galpon"] == g]
+    reg_op = ov._filtro_operativo(reg_df).sort_values("fecha")
+    pct  = float(reg_op.iloc[-1]["pct_produccion"]) if len(reg_op) > 0 else 0
+    hue  = int(float(reg_op.iloc[-1]["huevos_producidos"])) if len(reg_op) > 0 else 0
+    en_r, _ = ov._en_retiro(g, hoy)
+
+    # Calcular aves actuales = inicial - mortalidad acumulada histórica + operativa
+    aves_inicial = int(float(lote.get("cantidad_inicial", lote["cantidad_actual"])))
+    mort_acum = 0
+    if len(ov.registro_diario) > 0:
+        reg_g = ov.registro_diario[ov.registro_diario["galpon"] == g]
+        mort_acum = int(pd.to_numeric(reg_g["mortalidad"], errors="coerce").fillna(0).sum())
+    aves = max(0, aves_inicial - mort_acum)
+
+    total_aves    += aves
+    total_hue_hoy += hue
+    gal_activos   += 1
+    total_cubetas += hue / 30
+
+    resumen_galp.append({
+        "galpon": g, "planta": ov.GALPONES[g]["planta"],
+        "aves": aves, "edad_s": edad_s, "fase": fase,
+        "pct_pos": round(pct, 1), "huevos": hue,
+        "estado": "⚠️ RETIRO" if en_r else "✅ OK",
+    })
+
+# KPI row
+def _cubetas_planta(planta):
+    bodegas = [b for b, info in ov.BODEGAS.items()
+               if info.get("tipo") == "huevos" and info.get("planta") == planta]
+    if not bodegas or len(ov.inventario_huevos) == 0:
+        return 0.0
+    total = ov.inventario_huevos[ov.inventario_huevos["bodega"].isin(bodegas)]["cubetas_disponibles"].apply(
+        pd.to_numeric, errors="coerce").fillna(0).sum()
+    return round(float(total), 1)
+
+cub_central  = _cubetas_planta("Central")
+cub_sucursal = _cubetas_planta("Sucursal")
+n_mp_bajos = len(ov.materias_primas[ov.materias_primas["stock_kg"] < ov.materias_primas["stock_minimo"]]) if n_mp > 0 else 0
+
+col1, col2, col3, col4, col5 = st.columns(5)
+col1.metric("🐔 Aves totales",        f"{total_aves:,}")
+col2.metric("📦 Cubetas P. Central",  f"{cub_central:.1f}")
+col3.metric("📦 Cubetas P. Sucursal", f"{cub_sucursal:.1f}")
+col4.metric("🏠 Galpones activos",    gal_activos)
+col5.metric("⚠️ MP bajo mínimo",     n_mp_bajos,
+            delta="-" if n_mp_bajos > 0 else "OK", delta_color="inverse")
+
+st.markdown("---")
+
+# ── Tabla de galpones ─────────────────────────────────────────────
+section("ESTADO POR GALPÓN")
+
+df_galp = pd.DataFrame(resumen_galp)
+if len(df_galp) > 0:
+    df_show = df_galp.rename(columns={
+        "galpon": "Galpón", "planta": "Planta", "aves": "Aves",
+        "edad_s": "Semanas", "fase": "Fase Productiva",
+        "pct_pos": "% Postura", "huevos": "Huevos", "estado": "Estado",
+    })
+    st.dataframe(df_show, use_container_width=True, height=240,
+                 column_config={
+                     "Aves":      st.column_config.NumberColumn(format="%d"),
+                     "Huevos":    st.column_config.NumberColumn(format="%d"),
+                     "% Postura": st.column_config.ProgressColumn(min_value=0, max_value=100, format="%.1f%%"),
+                 })
+
+st.markdown("---")
+
+# ── Gráficos ──────────────────────────────────────────────────────
+col_g1, col_g2 = st.columns(2)
+
+with col_g1:
+    aves_vals = [r["aves"] for r in resumen_galp]
+    gal_names = [r["galpon"] for r in resumen_galp]
+    if any(a > 0 for a in aves_vals):
+        colores = [PAL["verde"] if a > 0 else PAL["gris_cl"] for a in aves_vals]
+        fig = go.Figure(go.Bar(
+            x=gal_names, y=aves_vals,
+            marker_color=colores, marker_line_color="white", marker_line_width=1.5,
+            text=[f"{a:,}" if a > 0 else "—" for a in aves_vals],
+            textposition="outside",
+        ))
+        fig.update_layout(
+            title="🐔 Aves por galpón", template="plotly_white",
+            plot_bgcolor="#F9FBE7", paper_bgcolor="#FAFAFA",
+            font_family="monospace", height=320,
+            margin=dict(t=40, b=10, l=10, r=10),
+        )
+        st.plotly_chart(fig, use_container_width=True)
+    else:
+        alert("Sin aves registradas. Ve a <b>Lotes de Aves</b> para registrar el primer lote.", "amber")
+
+with col_g2:
+    vals_pie = [(r["galpon"], r["aves"]) for r in resumen_galp if r["aves"] > 0]
+    if vals_pie:
+        labs, vals = zip(*vals_pie)
+        st.plotly_chart(fig_pie(labs, vals, "📊 Distribución de aves"), use_container_width=True)
+    else:
+        alert("Sin datos para gráfico de distribución.", "amber")
+
+# ── Tendencia producción últimos 14 días ──────────────────────────
+st.markdown("---")
+section("TENDENCIA DE PRODUCCIÓN — ÚLTIMOS 14 DÍAS")
+
+fecha_14 = (date.today() - timedelta(days=14)).strftime("%Y-%m-%d")
+reg_rec  = ov.registro_diario[ov.registro_diario["fecha"] >= fecha_14].copy()
+reg_rec  = ov._filtro_operativo(reg_rec)
+
+if len(reg_rec) > 1:
+    df_trend = reg_rec.groupby("fecha").agg(
+        huevos=("huevos_producidos", "sum"),
+        pct_avg=("pct_produccion", "mean"),
+        bal_kg=("kg_balanceado", "sum"),
+    ).reset_index().sort_values("fecha")
+
+    col_t1, col_t2 = st.columns(2)
+    with col_t1:
+        fig_hue = go.Figure()
+        fig_hue.add_trace(go.Bar(
+            x=df_trend["fecha"], y=df_trend["huevos"],
+            name="Huevos/día", marker_color=PAL["naranja_cl"],
+        ))
+        fig_hue.add_trace(go.Scatter(
+            x=df_trend["fecha"], y=df_trend["pct_avg"],
+            name="% Postura", yaxis="y2",
+            line=dict(color=PAL["verde"], width=2.5),
+            mode="lines+markers", marker=dict(size=5),
+        ))
+        fig_hue.update_layout(
+            title="🥚 Huevos y % Postura diarios", template="plotly_white",
+            yaxis=dict(title="Huevos", gridcolor="#E0E0E0"),
+            yaxis2=dict(title="% Postura", overlaying="y", side="right"),
+            font_family="monospace", height=320, plot_bgcolor="#FFF9F0",
+            paper_bgcolor="#FAFAFA", legend=dict(orientation="h"),
+            margin=dict(t=40, b=10, l=10, r=10),
+        )
+        st.plotly_chart(fig_hue, use_container_width=True)
+
+    with col_t2:
+        fig_bal = go.Figure(go.Bar(
+            x=df_trend["fecha"], y=df_trend["bal_kg"],
+            marker_color=PAL["azul_cl"], marker_line_color="white",
+        ))
+        fig_bal.update_layout(
+            title="🎒 Balanceado consumido (kg/día)", template="plotly_white",
+            font_family="monospace", height=320, plot_bgcolor="#F3F8FF",
+            paper_bgcolor="#FAFAFA", yaxis_title="kg",
+            margin=dict(t=40, b=10, l=10, r=10),
+        )
+        fig_bal.update_yaxes(gridcolor="#E0E0E0")
+        st.plotly_chart(fig_bal, use_container_width=True)
+else:
+    alert("Se necesitan al menos 2 días de registro para ver tendencias. Completa el <b>Registro Diario</b>.", "blue")
+
+# ── Alertas activas ───────────────────────────────────────────────
+alertas = []
+if n_mp_bajos > 0:
+    ings_bajos = ov.materias_primas[
+        ov.materias_primas["stock_kg"] < ov.materias_primas["stock_minimo"]
+    ]["ingrediente"].tolist()
+    alertas.append(f"🔴 <b>Stock MP bajo mínimo:</b> {', '.join(ings_bajos)}")
+
+ev_activos = ov.eventos_salud[ov.eventos_salud["estado"] == "EN CURSO"] if len(ov.eventos_salud) > 0 else pd.DataFrame()
+if len(ev_activos) > 0:
+    for _, ev in ev_activos.iterrows():
+        alertas.append(f"🚨 <b>Evento salud activo:</b> {ev['galpon']} — {ev['enfermedad']} ({ev['gravedad']})")
+
+inv_bal      = ov.inventario_balanceado[ov.inventario_balanceado["bultos_disponibles"] > 0] if len(ov.inventario_balanceado) > 0 else pd.DataFrame()
+total_bultos = int(float(inv_bal["bultos_disponibles"].sum())) if len(inv_bal) > 0 else 0
+if total_bultos < 50:
+    alertas.append(f"⚠️ <b>Balanceado bajo:</b> solo {total_bultos} bultos en inventario total.")
+
+if alertas:
+    st.markdown("---")
+    section("🔔 ALERTAS ACTIVAS")
+    for a in alertas:
+        alert(a, "red")
