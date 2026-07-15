@@ -909,7 +909,7 @@ def saldo_caja():
         return 0.0
 
 # ── Disciplina ─────────────────────────────────────────────────────────────────
-@st.cache_data(ttl=20)
+@st.cache_data(ttl=5)
 def get_stats_bulk():
     """Carga TODAS las estadísticas en 4 queries. Evita N queries por jugador."""
     # Deudas
